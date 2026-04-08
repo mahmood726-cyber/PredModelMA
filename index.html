@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PredModelMA — Prediction Model Validation Meta-Analysis (PROBAST)</title>
+<meta property="og:title" content="PredModelMA — Prediction Model Meta-Analysis">
+<meta property="og:description" content="Pool c-statistics, O:E ratios, calibration slopes. PROBAST risk of bias. Browser-based, offline-first.">
+<style>
+:root{--bg:#0a0e17;--surface:#131926;--surface2:#1a2236;--border:#2a3450;--text:#e2e8f0;--text2:#94a3b8;--accent:#8b5cf6;--accent2:#a78bfa;--green:#22c55e;--red:#ef4444;--amber:#f59e0b;--cyan:#06b6d4;--radius:8px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+.container{max-width:1400px;margin:0 auto;padding:20px}
+header{text-align:center;padding:30px 0 20px;border-bottom:1px solid var(--border);margin-bottom:24px}
+header h1{font-size:2rem;background:linear-gradient(135deg,var(--accent),var(--cyan));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header p{color:var(--text2);margin-top:6px;font-size:0.95rem}
+.tabs{display:flex;gap:4px;margin-bottom:20px;flex-wrap:wrap}
+.tab{padding:10px 20px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;color:var(--text2);transition:all 0.2s;font-size:0.9rem}
+.tab:hover{border-color:var(--accent)}.tab.active{background:var(--accent);color:white;border-color:var(--accent)}
+.panel{display:none}.panel.active{display:block}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card h3{font-size:1.1rem;margin-bottom:12px;color:var(--accent2)}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+.grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+label{display:block;font-size:0.85rem;color:var(--text2);margin-bottom:4px}
+input,select,textarea{width:100%;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:0.9rem}
+input:focus,select:focus{outline:none;border-color:var(--accent)}
+textarea{font-family:'Consolas',monospace;resize:vertical}
+.btn{padding:10px 20px;border:none;border-radius:var(--radius);cursor:pointer;font-size:0.9rem;font-weight:600;transition:all 0.2s}
+.btn-primary{background:var(--accent);color:white}.btn-primary:hover{background:var(--accent2)}
+.btn-secondary{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-sm{padding:6px 14px;font-size:0.82rem}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+table{width:100%;border-collapse:collapse;font-size:0.88rem}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+th{color:var(--text2);font-weight:600;font-size:0.82rem;text-transform:uppercase}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.stat-box{background:var(--surface2);border-radius:var(--radius);padding:14px;text-align:center}
+.stat-box .value{font-size:1.4rem;font-weight:700;color:var(--accent2)}
+.stat-box .label{font-size:0.78rem;color:var(--text2);margin-top:4px}
+.plot-container{background:var(--surface2);border-radius:var(--radius);padding:16px;margin-top:12px}
+canvas{width:100%;background:transparent}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:600}
+.badge-green{background:rgba(34,197,94,0.15);color:var(--green)}
+.badge-red{background:rgba(239,68,68,0.15);color:var(--red)}
+.badge-amber{background:rgba(245,158,11,0.15);color:var(--amber)}
+.badge-gray{background:rgba(148,163,184,0.15);color:var(--text2)}
+.info-box{background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:var(--radius);padding:14px;margin-bottom:16px;font-size:0.88rem;color:var(--text2)}
+.traffic-light{display:inline-block;width:16px;height:16px;border-radius:50%;margin:0 2px;vertical-align:middle}
+.tl-low{background:var(--green)}.tl-high{background:var(--red)}.tl-unclear{background:var(--amber)}
+footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;border-top:1px solid var(--border);margin-top:30px}
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <h1>PredModelMA</h1>
+  <p>Prediction Model Validation Meta-Analysis — c-statistics, O:E ratios, calibration, PROBAST</p>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="showTab('data')">Data Input</div>
+  <div class="tab" onclick="showTab('cstat')">C-statistic MA</div>
+  <div class="tab" onclick="showTab('oe')">O:E Ratio MA</div>
+  <div class="tab" onclick="showTab('probast')">PROBAST</div>
+  <div class="tab" onclick="showTab('forest')">Forest Plots</div>
+  <div class="tab" onclick="showTab('guide')">Guide</div>
+</div>
+
+<!-- DATA INPUT -->
+<div class="panel active" id="panel-data">
+  <div class="card">
+    <h3>Load Example</h3>
+    <div class="btn-group">
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('framingham')">Framingham Risk Score Validations</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('score2')">SCORE2 External Validations</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadExample('qrisk')">QRISK3 Validations</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Model Information</h3>
+    <div class="grid-2">
+      <div><label>Prediction model name</label><input type="text" id="modelName" value="Framingham Risk Score" placeholder="e.g., SCORE2"></div>
+      <div><label>Outcome predicted</label><input type="text" id="outcomeP" value="10-year CVD risk" placeholder="e.g., 10-year MACE"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Validation Study Data</h3>
+    <div class="info-box">One row per validation study. Format: Study, N, Events, C-statistic, C_lower, C_upper, O:E_ratio, OE_lower, OE_upper, CalSlope, PROBAST_overall (L/H/U)</div>
+    <textarea id="dataInput" rows="14" placeholder="Wilson2019  5000  450  0.76  0.73  0.79  1.05  0.95  1.16  0.92  L"></textarea>
+    <div class="grid-2" style="margin-top:12px">
+      <div><label>Pooling method</label>
+        <select id="poolMethod"><option value="reml">REML</option><option value="dl">DerSimonian-Laird</option></select>
+      </div>
+      <div><label>Significance level (α)</label><input type="number" id="alpha" value="0.05" step="0.01" min="0.001" max="0.2"></div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="runAnalysis()">Run Analysis</button>
+      <button class="btn btn-secondary" onclick="clearAll()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<!-- C-STATISTIC MA -->
+<div class="panel" id="panel-cstat">
+  <div class="card"><h3>Pooled C-statistic</h3><div id="cstatSummary" class="stat-grid"></div></div>
+  <div class="card"><h3>Study-level Discrimination</h3>
+    <table id="cstatTable"><thead><tr><th>Study</th><th>N</th><th>Events</th><th>C-statistic</th><th>95% CI</th><th>Weight</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card"><h3>Heterogeneity</h3><div id="cstatHet"></div></div>
+</div>
+
+<!-- O:E RATIO MA -->
+<div class="panel" id="panel-oe">
+  <div class="card"><h3>Pooled O:E Ratio</h3><div id="oeSummary" class="stat-grid"></div></div>
+  <div class="card"><h3>Study-level Calibration</h3>
+    <table id="oeTable"><thead><tr><th>Study</th><th>O:E Ratio</th><th>95% CI</th><th>Interpretation</th><th>Weight</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card"><h3>Heterogeneity</h3><div id="oeHet"></div></div>
+</div>
+
+<!-- PROBAST -->
+<div class="panel" id="panel-probast">
+  <div class="card"><h3>PROBAST Risk of Bias Summary</h3><div id="probastSummary" class="stat-grid"></div></div>
+  <div class="card"><h3>Traffic Light Table</h3>
+    <table id="probastTable">
+      <thead><tr><th>Study</th><th>Participants</th><th>Predictors</th><th>Outcome</th><th>Analysis</th><th>Overall</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)"><span class="traffic-light tl-low"></span> Low risk <span class="traffic-light tl-high"></span> High risk <span class="traffic-light tl-unclear"></span> Unclear</p>
+  </div>
+  <div class="card"><h3>PROBAST Bar Chart</h3>
+    <div class="plot-container"><canvas id="probastCanvas" width="700" height="300"></canvas></div>
+  </div>
+</div>
+
+<!-- FOREST PLOTS -->
+<div class="panel" id="panel-forest">
+  <div class="card"><h3>Forest Plot — C-statistics</h3>
+    <div class="plot-container"><canvas id="forestCCanvas" width="950" height="500"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('forestCCanvas','cstat_forest')">Export PNG</button></div>
+  </div>
+  <div class="card"><h3>Forest Plot — O:E Ratios</h3>
+    <div class="plot-container"><canvas id="forestOECanvas" width="950" height="500"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('forestOECanvas','oe_forest')">Export PNG</button></div>
+  </div>
+</div>
+
+<!-- GUIDE -->
+<div class="panel" id="panel-guide">
+  <div class="card">
+    <h3>Prediction Model MA — Method Guide</h3>
+    <div class="info-box"><strong>Why prediction model MA is different:</strong> Unlike treatment-effect MA, we pool performance measures (discrimination + calibration) rather than effect sizes. C-statistics are bounded [0.5, 1] and O:E ratios are bounded [0, ∞) — both require transformations for valid pooling.</div>
+    <table>
+      <tr><td><strong>C-statistic pooling</strong></td><td>Transform to logit(c) = log(c/(1-c)). Pool on logit scale. Back-transform pooled estimate. SE via delta method: SE(logit) = SE(c)/(c(1-c)).</td></tr>
+      <tr><td><strong>O:E ratio pooling</strong></td><td>Pool on log(O:E) scale. O:E = 1 means perfect calibration. O:E > 1 = underprediction. O:E < 1 = overprediction.</td></tr>
+      <tr><td><strong>Calibration slope</strong></td><td>Slope = 1 means perfect calibration. Slope < 1 = overfitting in development. Can pool directly (unbounded).</td></tr>
+      <tr><td><strong>PROBAST</strong></td><td>4 domains: Participants, Predictors, Outcome, Analysis. Each rated Low/High/Unclear. Overall = High if any domain is High.</td></tr>
+    </table>
+    <h3 style="margin-top:16px">PROBAST Domain Details</h3>
+    <table>
+      <tr><td><strong>D1: Participants</strong></td><td>Appropriate study design? Inclusions/exclusions? Sufficient sample size?</td></tr>
+      <tr><td><strong>D2: Predictors</strong></td><td>Defined consistently? Assessed blinded to outcome? Available at intended use time?</td></tr>
+      <tr><td><strong>D3: Outcome</strong></td><td>Pre-specified? Assessed blinded? Appropriate time horizon?</td></tr>
+      <tr><td><strong>D4: Analysis</strong></td><td>Events per variable ≥10? Continuous predictors handled appropriately? Missing data handled? Appropriate performance measures?</td></tr>
+    </table>
+  </div>
+</div>
+
+<footer>PredModelMA v1.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// STATS
+// ═══════════════════════════════════════════
+function normalCDF(z){const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;const s=z<0?-1:1;const x=Math.abs(z)/Math.sqrt(2);const t=1/(1+p*x);const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return 0.5*(1+s*y)}
+function normalQuantile(p){if(p<=0)return-Infinity;if(p>=1)return Infinity;if(p===0.5)return 0;const a=p<0.5?p:1-p;const t=Math.sqrt(-2*Math.log(a));const c0=2.515517,c1=0.802853,c2=0.010328,d1=1.432788,d2=0.189269,d3=0.001308;let z=t-(c0+c1*t+c2*t*t)/(1+d1*t+d2*t*t+d3*t*t*t);if(p<0.5)z=-z;return z}
+function chiSqP(x,df){if(x<=0)return 1;return 1-regGammaP(df/2,x/2)}
+function regGammaP(a,x){if(x<=0)return 0;const lga=lgamma(a);if(x<a+1){let s=1/a,t=1/a;for(let n=1;n<200;n++){t*=x/(a+n);s+=t;if(Math.abs(t)<1e-12*Math.abs(s))break}return s*Math.exp(-x+a*Math.log(x)-lga)}else{let f=1,b2=x+1-a,c2=1/1e-30,d2=1/b2;f=d2;for(let i=1;i<=200;i++){const an=-i*(i-a),bn=x+2*i+1-a;d2=bn+an*d2;if(Math.abs(d2)<1e-30)d2=1e-30;d2=1/d2;c2=bn+an/c2;if(Math.abs(c2)<1e-30)c2=1e-30;f*=d2*c2;if(Math.abs(d2*c2-1)<1e-10)break}return 1-f*Math.exp(-x+a*Math.log(x)-lga)}}
+function lgamma(x){const g=7,c=[0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];if(x<0.5)return Math.log(Math.PI/Math.sin(Math.PI*x))-lgamma(1-x);x-=1;let a=c[0];const t=x+g+0.5;for(let i=1;i<g+2;i++)a+=c[i]/(x+i);return 0.5*Math.log(2*Math.PI)+(x+0.5)*Math.log(t)-t+Math.log(a)}
+
+function logit(p){return Math.log(p/(1-p))}
+function expit(x){return 1/(1+Math.exp(-x))}
+
+function parseData(){
+  const raw=document.getElementById('dataInput').value.trim();
+  if(!raw)return null;
+  const lines=raw.split('\n').filter(l=>l.trim());
+  const data=[];
+  for(const line of lines){
+    const p=line.trim().split(/[\t,]+/);
+    if(p.length<6)continue;
+    const study=p[0].trim();
+    const n=parseInt(p[1]),events=parseInt(p[2]);
+    const c=parseFloat(p[3]),clo=parseFloat(p[4]),chi=parseFloat(p[5]);
+    let oe=null,oelo=null,oehi=null,calslope=null,probast='U';
+    if(p.length>=9){oe=parseFloat(p[6]);oelo=parseFloat(p[7]);oehi=parseFloat(p[8])}
+    if(p.length>=10)calslope=parseFloat(p[9]);
+    if(p.length>=11)probast=p[10].trim().toUpperCase().charAt(0);
+    if(isNaN(n)||isNaN(c))continue;
+    // Derive SE from CI if available
+    let se_c=null;
+    if(isFinite(clo)&&isFinite(chi)){se_c=(chi-clo)/(2*1.96)}
+    let se_oe=null;
+    if(isFinite(oelo)&&isFinite(oehi)&&oe>0){
+      se_oe=(Math.log(oehi)-Math.log(oelo))/(2*1.96);
+    }
+    data.push({study,n,events,c,clo,chi,se_c,oe,oelo,oehi,se_oe,calslope,probast,
+      probast_d1:probast,probast_d2:probast,probast_d3:probast,probast_d4:probast});
+  }
+  return data.length>=2?data:null;
+}
+
+// Pool c-statistics on logit scale
+function poolCstat(data,method){
+  const valid=data.filter(d=>d.c>0.5&&d.c<1&&d.se_c>0);
+  if(valid.length<2)return null;
+  const transformed=valid.map(d=>{
+    const lc=logit(d.c);
+    const se_lc=d.se_c/(d.c*(1-d.c));// delta method
+    return{...d,lc,se_lc,v:se_lc*se_lc};
+  });
+  const pooled=rePool(transformed.map(t=>t.lc),transformed.map(t=>t.v),method);
+  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+  const zc=normalQuantile(1-alpha/2);
+  const c_pooled=expit(pooled.beta);
+  const c_lo=expit(pooled.beta-zc*pooled.se);
+  const c_hi=expit(pooled.beta+zc*pooled.se);
+  return{...pooled,c:c_pooled,ci:[c_lo,c_hi],studies:transformed};
+}
+
+// Pool O:E ratios on log scale
+function poolOE(data,method){
+  const valid=data.filter(d=>d.oe>0&&d.se_oe>0);
+  if(valid.length<2)return null;
+  const transformed=valid.map(d=>{
+    const loe=Math.log(d.oe);
+    return{...d,loe,v:d.se_oe*d.se_oe};
+  });
+  const pooled=rePool(transformed.map(t=>t.loe),transformed.map(t=>t.v),method);
+  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+  const zc=normalQuantile(1-alpha/2);
+  const oe_pooled=Math.exp(pooled.beta);
+  const oe_lo=Math.exp(pooled.beta-zc*pooled.se);
+  const oe_hi=Math.exp(pooled.beta+zc*pooled.se);
+  return{...pooled,oe:oe_pooled,ci:[oe_lo,oe_hi],studies:transformed};
+}
+
+// Generic random-effects pooling
+function rePool(yi,vi,method){
+  const k=yi.length;
+  // Fixed-effect first
+  let sumW=0,sumWY=0;
+  for(let i=0;i<k;i++){const w=1/vi[i];sumW+=w;sumWY+=w*yi[i]}
+  const fe=sumWY/sumW;
+  let Q=0;
+  for(let i=0;i<k;i++){const w=1/vi[i];Q+=w*(yi[i]-fe)*(yi[i]-fe)}
+  const df=k-1;
+  const Qp=chiSqP(Q,df);
+  let sumW2=0;
+  for(let i=0;i<k;i++)sumW2+=(1/vi[i])*(1/vi[i]);
+  const C=sumW-sumW2/sumW;
+
+  let tau2;
+  if(method==='reml'){
+    // REML via iterative Fisher scoring
+    tau2=Math.max(0,(Q-df)/C);
+    for(let iter=0;iter<50;iter++){
+      let sumW_re=0,sumW2_re=0,sumWY_re=0;
+      for(let i=0;i<k;i++){const w=1/(vi[i]+tau2);sumW_re+=w;sumW2_re+=w*w;sumWY_re+=w*yi[i]}
+      const mu=sumWY_re/sumW_re;
+      let dL=0,d2L=0;
+      for(let i=0;i<k;i++){
+        const w=1/(vi[i]+tau2);
+        dL+=-w+w*w*(yi[i]-mu)*(yi[i]-mu);
+        d2L+=w*w-2*w*w*w*(yi[i]-mu)*(yi[i]-mu);
+      }
+      dL*=0.5;d2L*=0.5;
+      // REML adjustment
+      dL+=0.5*sumW2_re/sumW_re;
+      const step=-dL/d2L;
+      tau2=Math.max(0,tau2+step);
+      if(Math.abs(step)<1e-8)break;
+    }
+  }else{
+    tau2=Math.max(0,(Q-df)/C);
+  }
+
+  let sumWre=0,sumWreY=0;
+  const weights=[];
+  for(let i=0;i<k;i++){const w=1/(vi[i]+tau2);sumWre+=w;sumWreY+=w*yi[i];weights.push(w)}
+  const beta=sumWreY/sumWre;
+  const se=1/Math.sqrt(sumWre);
+  const z=beta/se;
+  const p=2*(1-normalCDF(Math.abs(z)));
+  const I2=Math.max(0,(Q-df)/Q)*100;
+  const totalW=weights.reduce((s,w)=>s+w,0);
+  const wPct=weights.map(w=>(w/totalW*100));
+  return{beta,se,z,p,Q,Qp,I2,tau2,k,weights:wPct};
+}
+
+// ═══════════════════════════════════════════
+// ANALYSIS
+// ═══════════════════════════════════════════
+let lastResults=null;
+
+function runAnalysis(){
+  const data=parseData();
+  if(!data){alert('Need at least 2 studies.');return}
+  const method=document.getElementById('poolMethod').value;
+  const cPool=poolCstat(data,method);
+  const oePool=poolOE(data,method);
+  lastResults={data,cPool,oePool};
+  renderCstat();renderOE();renderProbast();renderForests();
+  showTab('cstat');
+}
+
+function renderCstat(){
+  const r=lastResults;
+  const cp=r.cPool;
+  if(!cp){document.getElementById('cstatSummary').innerHTML='<p>Insufficient c-statistic data for pooling.</p>';return}
+  const perf=cp.c>=0.8?'Excellent':cp.c>=0.7?'Good':cp.c>=0.6?'Moderate':'Poor';
+  const perfBadge=cp.c>=0.7?'badge-green':cp.c>=0.6?'badge-amber':'badge-red';
+  document.getElementById('cstatSummary').innerHTML=`
+    <div class="stat-box"><div class="value">${cp.c.toFixed(3)}</div><div class="label">Pooled C-statistic</div></div>
+    <div class="stat-box"><div class="value">${cp.ci[0].toFixed(3)} – ${cp.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    <div class="stat-box"><div class="value"><span class="badge ${perfBadge}">${perf}</span></div><div class="label">Discrimination</div></div>
+    <div class="stat-box"><div class="value">${cp.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+    <div class="stat-box"><div class="value">${cp.tau2.toFixed(5)}</div><div class="label">τ² (logit scale)</div></div>
+    <div class="stat-box"><div class="value">${cp.k}</div><div class="label">Studies Pooled</div></div>
+  `;
+  const studies=cp.studies;
+  document.querySelector('#cstatTable tbody').innerHTML=studies.map((s,i)=>`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${s.events}</td><td>${s.c.toFixed(3)}</td><td>${s.clo.toFixed(3)} – ${s.chi.toFixed(3)}</td><td>${cp.weights[i].toFixed(1)}%</td></tr>`).join('');
+  document.getElementById('cstatHet').innerHTML=`<p>Q = ${cp.Q.toFixed(2)}, df = ${cp.k-1}, P = ${cp.Qp.toFixed(4)} | I² = ${cp.I2.toFixed(1)}% | τ² = ${cp.tau2.toFixed(5)} (logit scale)</p>`;
+}
+
+function renderOE(){
+  const r=lastResults;
+  const oe=r.oePool;
+  if(!oe){document.getElementById('oeSummary').innerHTML='<p>Insufficient O:E ratio data for pooling.</p>';return}
+  const cal=oe.oe>1.1?'Under-prediction':oe.oe<0.9?'Over-prediction':'Well calibrated';
+  const calBadge=Math.abs(oe.oe-1)<0.1?'badge-green':Math.abs(oe.oe-1)<0.2?'badge-amber':'badge-red';
+  document.getElementById('oeSummary').innerHTML=`
+    <div class="stat-box"><div class="value">${oe.oe.toFixed(3)}</div><div class="label">Pooled O:E Ratio</div></div>
+    <div class="stat-box"><div class="value">${oe.ci[0].toFixed(3)} – ${oe.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    <div class="stat-box"><div class="value"><span class="badge ${calBadge}">${cal}</span></div><div class="label">Calibration</div></div>
+    <div class="stat-box"><div class="value">${oe.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+    <div class="stat-box"><div class="value">${oe.k}</div><div class="label">Studies Pooled</div></div>
+  `;
+  const studies=oe.studies;
+  document.querySelector('#oeTable tbody').innerHTML=studies.map((s,i)=>{
+    const interp=s.oe>1.1?'Under-predicts risk':s.oe<0.9?'Over-predicts risk':'Calibrated';
+    return`<tr><td>${s.study}</td><td>${s.oe.toFixed(3)}</td><td>${s.oelo.toFixed(3)} – ${s.oehi.toFixed(3)}</td><td>${interp}</td><td>${oe.weights[i].toFixed(1)}%</td></tr>`;
+  }).join('');
+  document.getElementById('oeHet').innerHTML=`<p>Q = ${oe.Q.toFixed(2)}, df = ${oe.k-1}, P = ${oe.Qp.toFixed(4)} | I² = ${oe.I2.toFixed(1)}%</p>`;
+}
+
+function renderProbast(){
+  const data=lastResults.data;
+  const counts={L:0,H:0,U:0};
+  data.forEach(d=>{if(counts[d.probast]!==undefined)counts[d.probast]++});
+  const total=data.length;
+  document.getElementById('probastSummary').innerHTML=`
+    <div class="stat-box"><div class="value" style="color:var(--green)">${counts.L}</div><div class="label">Low Risk (${(counts.L/total*100).toFixed(0)}%)</div></div>
+    <div class="stat-box"><div class="value" style="color:var(--red)">${counts.H}</div><div class="label">High Risk (${(counts.H/total*100).toFixed(0)}%)</div></div>
+    <div class="stat-box"><div class="value" style="color:var(--amber)">${counts.U}</div><div class="label">Unclear (${(counts.U/total*100).toFixed(0)}%)</div></div>
+    <div class="stat-box"><div class="value">${total}</div><div class="label">Total Studies</div></div>
+  `;
+
+  const robMap={L:'<span class="traffic-light tl-low"></span>',H:'<span class="traffic-light tl-high"></span>',U:'<span class="traffic-light tl-unclear"></span>'};
+  document.querySelector('#probastTable tbody').innerHTML=data.map(d=>`<tr><td>${d.study}</td><td>${robMap[d.probast_d1]||robMap.U}</td><td>${robMap[d.probast_d2]||robMap.U}</td><td>${robMap[d.probast_d3]||robMap.U}</td><td>${robMap[d.probast_d4]||robMap.U}</td><td>${robMap[d.probast]||robMap.U}</td></tr>`).join('');
+
+  // Bar chart
+  const canvas=document.getElementById('probastCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H2=canvas.height;
+  ctx.clearRect(0,0,W,H2);
+  const domains=['Participants','Predictors','Outcome','Analysis','Overall'];
+  const barW=W/domains.length-20;
+  const pad={top:30,bottom:50};
+  const barH=H2-pad.top-pad.bottom;
+
+  domains.forEach((dom,i)=>{
+    const x=10+i*(barW+20);
+    const low=counts.L/total,high=counts.H/total,unclear=counts.U/total;
+    // Low (green)
+    ctx.fillStyle='#22c55e';ctx.fillRect(x,pad.top,barW,barH*low);
+    // Unclear (amber)
+    ctx.fillStyle='#f59e0b';ctx.fillRect(x,pad.top+barH*low,barW,barH*unclear);
+    // High (red)
+    ctx.fillStyle='#ef4444';ctx.fillRect(x,pad.top+barH*low+barH*unclear,barW,barH*high);
+    // Label
+    ctx.fillStyle='#94a3b8';ctx.font='11px sans-serif';ctx.textAlign='center';
+    ctx.fillText(dom,x+barW/2,H2-pad.bottom+16);
+    // Percentages
+    ctx.fillStyle='white';ctx.font='bold 10px sans-serif';
+    if(low>0.05)ctx.fillText((low*100).toFixed(0)+'%',x+barW/2,pad.top+barH*low/2+5);
+    if(unclear>0.05)ctx.fillText((unclear*100).toFixed(0)+'%',x+barW/2,pad.top+barH*low+barH*unclear/2+5);
+    if(high>0.05)ctx.fillText((high*100).toFixed(0)+'%',x+barW/2,pad.top+barH*low+barH*unclear+barH*high/2+5);
+  });
+}
+
+function renderForests(){
+  renderForestC();renderForestOE();
+}
+
+function renderForestC(){
+  const canvas=document.getElementById('forestCCanvas');
+  const r=lastResults;
+  const cp=r.cPool;
+  if(!cp)return;
+  const studies=cp.studies;
+  const rows=studies.length+1;
+  canvas.height=Math.max(300,rows*28+100);
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad={top:40,right:120,bottom:40,left:200};
+  const pw=W-pad.left-pad.right;
+  const rowH=24;
+
+  const allC=[...studies.flatMap(s=>[s.clo,s.chi]),cp.ci[0],cp.ci[1]];
+  const cMin=Math.min(...allC.filter(isFinite))*0.95;
+  const cMax=Math.min(Math.max(...allC.filter(isFinite))*1.02,1);
+  const xScale=v=>pad.left+((v-cMin)/(cMax-cMin))*pw;
+
+  // Reference line at 0.5
+  if(cMin<=0.5){
+    ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(xScale(0.5),pad.top);ctx.lineTo(xScale(0.5),H-pad.bottom);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.fillStyle='#94a3b8';ctx.font='bold 11px sans-serif';ctx.textAlign='left';
+  ctx.fillText('Study',10,pad.top-10);
+  ctx.textAlign='center';ctx.fillText('C-statistic (95% CI)',pad.left+pw/2,pad.top-10);
+
+  studies.forEach((s,i)=>{
+    const y=pad.top+10+i*rowH;
+    ctx.strokeStyle='#a78bfa';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(xScale(s.clo),y);ctx.lineTo(xScale(s.chi),y);ctx.stroke();
+    const sz=Math.max(3,Math.min(8,cp.weights[i]/5));
+    ctx.fillStyle='#a78bfa';ctx.fillRect(xScale(s.c)-sz/2,y-sz/2,sz,sz);
+    ctx.fillStyle='#e2e8f0';ctx.font='11px sans-serif';ctx.textAlign='right';
+    ctx.fillText(s.study,pad.left-8,y+4);
+    ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+    ctx.fillText(`${s.c.toFixed(3)} [${s.clo.toFixed(3)}, ${s.chi.toFixed(3)}]`,W-pad.right+5,y+4);
+  });
+
+  // Diamond for pooled
+  const divY=pad.top+10+studies.length*rowH+8;
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,divY);ctx.lineTo(W-10,divY);ctx.stroke();
+  const y=divY+20;
+  const cx=xScale(cp.c),lx=xScale(cp.ci[0]),rx=xScale(cp.ci[1]);
+  ctx.beginPath();ctx.moveTo(lx,y);ctx.lineTo(cx,y-6);ctx.lineTo(rx,y);ctx.lineTo(cx,y+6);ctx.closePath();
+  ctx.fillStyle='#8b5cf6';ctx.globalAlpha=0.7;ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle='#8b5cf6';ctx.font='bold 11px sans-serif';ctx.textAlign='right';
+  ctx.fillText('Pooled',pad.left-8,y+4);
+  ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+  ctx.fillText(`${cp.c.toFixed(3)} [${cp.ci[0].toFixed(3)}, ${cp.ci[1].toFixed(3)}]`,W-pad.right+5,y+4);
+}
+
+function renderForestOE(){
+  const canvas=document.getElementById('forestOECanvas');
+  const r=lastResults;
+  const oe=r.oePool;
+  if(!oe){const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);return}
+  const studies=oe.studies;
+  const rows=studies.length+1;
+  canvas.height=Math.max(300,rows*28+100);
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad={top:40,right:120,bottom:40,left:200};
+  const pw=W-pad.left-pad.right;
+  const rowH=24;
+
+  const allOE=[...studies.flatMap(s=>[s.oelo,s.oehi]),oe.ci[0],oe.ci[1]];
+  const oeMin=Math.max(Math.min(...allOE.filter(isFinite))*0.9,0);
+  const oeMax=Math.max(...allOE.filter(isFinite))*1.1;
+  const xScale=v=>pad.left+((v-oeMin)/(oeMax-oeMin))*pw;
+
+  // Reference line at 1
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(xScale(1),pad.top);ctx.lineTo(xScale(1),H-pad.bottom);ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle='#94a3b8';ctx.font='bold 11px sans-serif';ctx.textAlign='left';
+  ctx.fillText('Study',10,pad.top-10);
+  ctx.textAlign='center';ctx.fillText('O:E Ratio (95% CI)',pad.left+pw/2,pad.top-10);
+
+  studies.forEach((s,i)=>{
+    const y=pad.top+10+i*rowH;
+    const color=Math.abs(s.oe-1)>0.2?'#ef4444':'#06b6d4';
+    ctx.strokeStyle=color;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(xScale(s.oelo),y);ctx.lineTo(xScale(s.oehi),y);ctx.stroke();
+    ctx.beginPath();ctx.arc(xScale(s.oe),y,4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+    ctx.fillStyle='#e2e8f0';ctx.font='11px sans-serif';ctx.textAlign='right';
+    ctx.fillText(s.study,pad.left-8,y+4);
+    ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+    ctx.fillText(`${s.oe.toFixed(2)} [${s.oelo.toFixed(2)}, ${s.oehi.toFixed(2)}]`,W-pad.right+5,y+4);
+  });
+
+  const divY=pad.top+10+studies.length*rowH+8;
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,divY);ctx.lineTo(W-10,divY);ctx.stroke();
+  const y=divY+20;
+  const cx=xScale(oe.oe),lx=xScale(oe.ci[0]),rx=xScale(oe.ci[1]);
+  ctx.beginPath();ctx.moveTo(lx,y);ctx.lineTo(cx,y-6);ctx.lineTo(rx,y);ctx.lineTo(cx,y+6);ctx.closePath();
+  ctx.fillStyle='#06b6d4';ctx.globalAlpha=0.7;ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle='#06b6d4';ctx.font='bold 11px sans-serif';ctx.textAlign='right';
+  ctx.fillText('Pooled',pad.left-8,y+4);
+}
+
+// ═══════════════════════════════════════════
+// EXAMPLES
+// ═══════════════════════════════════════════
+const EXAMPLES={
+  framingham:{model:'Framingham Risk Score',outcome:'10-year CVD risk',data:`DAgostino2008\t8491\t590\t0.763\t0.746\t0.780\t1.12\t1.03\t1.22\t0.88\tL
+Yeboah2016\t6814\t473\t0.710\t0.688\t0.732\t1.25\t1.13\t1.38\t0.82\tH
+Kavousi2014\t4240\t312\t0.745\t0.720\t0.770\t0.92\t0.82\t1.03\t0.95\tL
+DeFilippis2015\t4227\t295\t0.718\t0.692\t0.744\t1.18\t1.05\t1.33\t0.79\tH
+Ridker2007\t15036\t1080\t0.757\t0.742\t0.772\t1.05\t0.99\t1.12\t0.91\tL
+Cook2012\t24558\t1677\t0.742\t0.731\t0.753\t1.08\t1.03\t1.14\t0.87\tL
+Mora2011\t10916\t766\t0.728\t0.711\t0.745\t1.15\t1.07\t1.24\t0.84\tH
+Goff2014\t3704\t260\t0.761\t0.733\t0.789\t0.95\t0.84\t1.08\t0.93\tL
+Koller2016\t5610\t392\t0.735\t0.714\t0.756\t1.22\t1.10\t1.35\t0.81\tH
+vanDishoeck2020\t4012\t281\t0.751\t0.726\t0.776\t1.08\t0.96\t1.22\t0.90\tL`},
+  score2:{model:'SCORE2',outcome:'10-year CVD risk',data:`SCORE2WG2021\t677684\t30102\t0.685\t0.680\t0.690\t1.02\t1.00\t1.04\t0.94\tL
+Pennells2023\t35928\t2509\t0.712\t0.698\t0.726\t0.98\t0.94\t1.02\t0.96\tL
+Hageman2024\t12408\t868\t0.695\t0.676\t0.714\t1.08\t1.01\t1.16\t0.91\tL
+Svingen2023\t4128\t289\t0.702\t0.676\t0.728\t1.15\t1.02\t1.30\t0.85\tH
+Mortensen2023\t8560\t599\t0.688\t0.668\t0.708\t1.10\t1.01\t1.20\t0.89\tL
+Rodriguez2024\t6230\t436\t0.721\t0.700\t0.742\t0.94\t0.85\t1.04\t0.97\tL
+Damen2024\t5890\t412\t0.708\t0.686\t0.730\t1.05\t0.95\t1.16\t0.92\tL`},
+  qrisk:{model:'QRISK3',outcome:'10-year CVD risk',data:`Hippisley-Cox2017\t10264080\t363565\t0.880\t0.879\t0.881\t1.01\t1.00\t1.02\t0.98\tL
+Livingstone2021\t2084445\t73780\t0.842\t0.840\t0.844\t1.08\t1.06\t1.10\t0.92\tH
+Nafilyan2021\t5123350\t181388\t0.865\t0.864\t0.866\t1.05\t1.04\t1.06\t0.95\tL
+Riley2022\t392000\t13882\t0.851\t0.847\t0.855\t1.03\t1.01\t1.05\t0.94\tL
+Pate2023\t1230000\t43551\t0.838\t0.835\t0.841\t1.12\t1.10\t1.14\t0.88\tH
+Woodward2023\t245000\t8673\t0.825\t0.819\t0.831\t1.15\t1.11\t1.19\t0.85\tH`}
+};
+
+function loadExample(k){const e=EXAMPLES[k];document.getElementById('modelName').value=e.model;document.getElementById('outcomeP').value=e.outcome;document.getElementById('dataInput').value=e.data}
+
+// ═══════════════════════════════════════════
+// UI
+// ═══════════════════════════════════════════
+function showTab(n){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById('panel-'+n).classList.add('active');document.querySelectorAll('.tab').forEach(t=>{const m=t.getAttribute('onclick')?.match(/showTab\('(\w+)'\)/);if(m&&m[1]===n)t.classList.add('active')})}
+function clearAll(){document.getElementById('dataInput').value=''}
+function exportPlot(id,name){const c=document.getElementById(id);const a=document.createElement('a');a.download=name+'.png';a.href=c.toDataURL();a.click()}
+</script>
+</body>
+</html>
