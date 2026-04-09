@@ -69,6 +69,15 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
 .applicability-row .domain{width:120px;font-size:0.85rem;color:var(--text2)}
 .nri-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 @media(max-width:700px){.nri-grid{grid-template-columns:1fr}}
+.loo-table{max-height:320px;overflow-y:auto}
+.loo-table table{font-size:0.82rem}
+.loo-table tr.influential{background:rgba(239,68,68,0.08)}
+.decomp-bar{height:22px;border-radius:4px;display:flex;overflow:hidden;margin:8px 0}
+.decomp-bar .explained{background:var(--accent);height:100%}
+.decomp-bar .unexplained{background:var(--surface2);border:1px solid var(--border);height:100%}
+.threshold-input{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.threshold-input label{margin-bottom:0;white-space:nowrap}
+.threshold-input input{max-width:120px}
 </style>
 </head>
 <body>
@@ -109,7 +118,7 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   <div class="card">
     <h3>Validation Study Data</h3>
     <div class="info-box">One row per validation study. Format: Study, N, Events, C-statistic, C_lower, C_upper, O:E_ratio, OE_lower, OE_upper, CalSlope, PROBAST_overall (L/H/U)<br>
-    <span style="color:var(--text2);font-size:0.82rem">Optional extra columns (after PROBAST): CalSlope_SE, NRI_events, NRI_nonevents, NRI_event_SE, NRI_nonevent_SE, Applicability (L/H/U)</span></div>
+    <span style="color:var(--text2);font-size:0.82rem">Optional extra columns (after PROBAST): CalSlope_SE, NRI_events, NRI_nonevents, NRI_event_SE, NRI_nonevent_SE, Applicability (L/H/U), IDI, IDI_SE, CITL, CITL_SE, TP, FP, Threshold(%)</span></div>
     <textarea id="dataInput" rows="14" placeholder="Wilson2019  5000  450  0.76  0.73  0.79  1.05  0.95  1.16  0.92  L"></textarea>
     <div class="grid-4" style="margin-top:12px">
       <div><label>Pooling method</label>
@@ -214,6 +223,50 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
     <div id="subgroupResults" class="subgroup-grid"></div>
     <div id="subgroupTest" style="margin-top:12px"></div>
   </div>
+  <div class="card">
+    <h3>Newcombe Variance Approximation for C-statistic (Newcombe 2006)</h3>
+    <div class="info-box">When SE is not reported and only N + events are available (no CI), the Newcombe formula derives Var(c) from the concordance structure. Applied automatically when CI columns are missing or empty.</div>
+    <div id="newcombeResults"></div>
+  </div>
+  <div class="card">
+    <h3>Integrated Discrimination Improvement (IDI) Pooling</h3>
+    <div class="info-box">IDI = mean predicted probability increase in events minus mean predicted probability increase in non-events. Pooled on raw scale (approximately normal for large N). Provide IDI and IDI_SE as optional columns 18-19.</div>
+    <div id="idiResults"></div>
+  </div>
+  <div class="card">
+    <h3>Clinical Utility Meta-Analysis (Net Benefit — Vickers Decision Curve)</h3>
+    <div class="info-box">Net benefit = TP/N - FP/N x (pt/(1-pt)) where pt = threshold probability. Provide TP, FP, and threshold (%) as optional columns 22-24. Or set a common threshold below to compute from events/N.</div>
+    <div class="threshold-input">
+      <label>Decision threshold probability (%):</label>
+      <input type="number" id="nbThreshold" value="10" min="1" max="99" step="1">
+      <button class="btn btn-secondary btn-sm" onclick="renderNetBenefit()">Recalculate</button>
+    </div>
+    <div id="netBenefitResults"></div>
+  </div>
+  <div class="card">
+    <h3>Calibration-in-the-Large (CITL) Meta-Analysis</h3>
+    <div class="info-box">CITL = observed - predicted rate (on logit scale). Perfect calibration: CITL = 0. When CITL is reported directly, pool on raw scale. Otherwise derived from O:E as log(O/E). Provide CITL and CITL_SE as optional columns 20-21.</div>
+    <div id="citlResults"></div>
+  </div>
+  <div class="card">
+    <h3>Discrimination Improvement Funnel Plot</h3>
+    <div class="info-box">X-axis: c-statistic per study. Y-axis: SE of c-statistic. Pseudo-95% CI lines around pooled c. Points colored by PROBAST rating. Egger-style regression test for small-study effects.</div>
+    <div class="plot-container"><canvas id="funnelCCanvas" width="800" height="600"></canvas></div>
+    <div id="eggerResult" style="margin-top:8px"></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('funnelCCanvas','cstat_funnel')">Export PNG</button></div>
+  </div>
+  <div class="card">
+    <h3>Leave-One-Out Sensitivity for Pooled C-statistic</h3>
+    <div class="info-box">For each study, re-pool c without that study. Reports change in pooled c and flags any single study that shifts it materially (> 0.01 on c scale).</div>
+    <div id="looResults" class="loo-table"></div>
+    <div class="plot-container" style="margin-top:12px"><canvas id="looCCanvas" width="950" height="500"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('looCCanvas','loo_cstat')">Export PNG</button></div>
+  </div>
+  <div class="card">
+    <h3>Heterogeneity Decomposition (Meta-Regression on Sample Size)</h3>
+    <div class="info-box">Meta-regression of logit(c) on log(N). Reports R-squared = proportion of tau-squared explained by sample size. If R-squared > 50%, smaller studies tend to show systematically different c-statistics (spectrum effect).</div>
+    <div id="hetDecompResults"></div>
+  </div>
 </div>
 
 <!-- FOREST PLOTS -->
@@ -248,6 +301,13 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
       <tr><td><strong>NRI pooling</strong></td><td>Event NRI and non-event NRI pooled separately. Overall NRI = sum. Requires NRI data in optional columns.</td></tr>
       <tr><td><strong>Applicability</strong></td><td>PROBAST applicability is distinct from risk of bias: low RoB but high concern if population/predictors/outcome differ from target use.</td></tr>
       <tr><td><strong>Subgroup by RoB</strong></td><td>Compare pooled c between Low-RoB and High/Unclear-RoB subgroups. Chi-squared test for subgroup difference.</td></tr>
+      <tr><td><strong>Newcombe SE</strong></td><td>When CI is not reported, derive SE from N and events using Newcombe 2006 approximation: Var(c) accounts for concordance structure.</td></tr>
+      <tr><td><strong>IDI pooling</strong></td><td>Integrated Discrimination Improvement pooled on raw scale. IDI > 0 = new model improves discrimination. Provide IDI + IDI_SE.</td></tr>
+      <tr><td><strong>Net benefit</strong></td><td>Clinical utility via Vickers decision curve. Net benefit = TP/N - FP/N x pt/(1-pt). Pooled across studies at a specified threshold.</td></tr>
+      <tr><td><strong>CITL</strong></td><td>Calibration-in-the-large. CITL = 0 = perfect. Derived from O:E as log(O/E) if not reported directly. Pooled on raw scale.</td></tr>
+      <tr><td><strong>Funnel plot</strong></td><td>Discrimination funnel: c-stat vs SE(c). Pseudo-CI lines. Egger regression for small-study effects. Colored by PROBAST.</td></tr>
+      <tr><td><strong>Leave-one-out</strong></td><td>Sensitivity: re-pool c without each study. Flags studies shifting pooled c by > 0.01. Forest plot of LOO estimates.</td></tr>
+      <tr><td><strong>Het. decomposition</strong></td><td>Meta-regression of logit(c) on log(N). R-squared = proportion of tau-squared explained. R-squared > 50% = spectrum effect.</td></tr>
     </table>
     <h3 style="margin-top:16px">PROBAST Domain Details</h3>
     <table>
@@ -259,7 +319,7 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   </div>
 </div>
 
-<footer>PredModelMA v2.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
+<footer>PredModelMA v3.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
 </div>
 
 <script>
@@ -414,10 +474,26 @@ function parseData(){
     if(p.length>=15) nri_event_se=parseFloat(p[14]);
     if(p.length>=16) nri_nonevent_se=parseFloat(p[15]);
     if(p.length>=17) applicability=p[16].trim().toUpperCase().charAt(0);
+    // Extended columns: IDI, IDI_SE, CITL, CITL_SE, TP, FP, Threshold(%)
+    let idi=null,idi_se=null,citl=null,citl_se=null,tp=null,fp=null,nb_threshold=null;
+    if(p.length>=18) idi=parseFloat(p[17]);
+    if(p.length>=19) idi_se=parseFloat(p[18]);
+    if(p.length>=20) citl=parseFloat(p[19]);
+    if(p.length>=21) citl_se=parseFloat(p[20]);
+    if(p.length>=22) tp=parseFloat(p[21]);
+    if(p.length>=23) fp=parseFloat(p[22]);
+    if(p.length>=24) nb_threshold=parseFloat(p[23]);
     if(isNaN(n)||isNaN(c))continue;
     // Derive SE from CI if available
     let se_c=null;
     if(isFinite(clo)&&isFinite(chi)){se_c=(chi-clo)/(2*1.96)}
+    // Newcombe variance approximation when CI is not available (Newcombe 2006)
+    if((se_c===null||!isFinite(se_c)||se_c<=0)&&isFinite(c)&&c>0.5&&c<1&&events>0&&n>events){
+      const nEvents=events;
+      const nNon=n-events;
+      const varC=c*(1-c)*(1+(nEvents/2-1)*(1-c)/(2-c)+(nNon/2-1)*c/(1+c))/(nEvents*nNon);
+      se_c=Math.sqrt(varC);
+    }
     let se_oe=null;
     if(isFinite(oelo)&&isFinite(oehi)&&oe>0){
       se_oe=(Math.log(oehi)-Math.log(oelo))/(2*1.96);
@@ -426,7 +502,8 @@ function parseData(){
     if(isFinite(calslope)&&!isFinite(calslope_se)){calslope_se=null}
     data.push({study,n,events,c,clo,chi,se_c,oe,oelo,oehi,se_oe,calslope,calslope_se,probast,
       probast_d1:probast,probast_d2:probast,probast_d3:probast,probast_d4:probast,
-      nri_event,nri_nonevent,nri_event_se,nri_nonevent_se,applicability});
+      nri_event,nri_nonevent,nri_event_se,nri_nonevent_se,applicability,
+      idi,idi_se,citl,citl_se,tp,fp,nb_threshold});
   }
   return data.length>=2?data:null;
 }
@@ -584,6 +661,230 @@ function subgroupByProbast(data,method){
   return{poolLow,poolHigh,testStat,nLow:lowRoB.length,nHigh:highRoB.length};
 }
 
+// Newcombe variance approximation (Newcombe 2006)
+function newcombeVariance(c, nEvents, nNon) {
+  if (c <= 0.5 || c >= 1 || nEvents < 1 || nNon < 1) return null;
+  return c * (1 - c) * (1 + (nEvents / 2 - 1) * (1 - c) / (2 - c) + (nNon / 2 - 1) * c / (1 + c)) / (nEvents * nNon);
+}
+
+// Pool IDI on raw scale (approximately normal)
+function poolIDI(data, method) {
+  const valid = data.filter(d => isFinite(d.idi) && isFinite(d.idi_se) && d.idi_se > 0);
+  if (valid.length < 2) return null;
+  const pooled = rePool(valid.map(d => d.idi), valid.map(d => d.idi_se * d.idi_se), method);
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  const zc = normalQuantile(1 - alpha / 2);
+  return { ...pooled, idi: pooled.beta, ci: [pooled.beta - zc * pooled.se, pooled.beta + zc * pooled.se], studies: valid };
+}
+
+// Clinical utility: compute net benefit at threshold pt
+function computeNetBenefit(data, thresholdPct) {
+  const pt = thresholdPct / 100;
+  if (pt <= 0 || pt >= 1) return null;
+  const odds = pt / (1 - pt);
+  const results = [];
+  for (const d of data) {
+    let tp_val = null, fp_val = null;
+    // If TP and FP are provided directly
+    if (d.tp !== null && isFinite(d.tp) && d.fp !== null && isFinite(d.fp)) {
+      tp_val = d.tp;
+      fp_val = d.fp;
+    } else if (d.events !== null && isFinite(d.events) && d.events > 0 && isFinite(d.c) && d.c > 0.5) {
+      // Approximate from c-statistic and prevalence (Vickers approximation)
+      // Sensitivity ~ c at threshold, specificity ~ c
+      // This is a rough approximation: assume Se = Sp = c at the threshold
+      const prev = d.events / d.n;
+      const se_approx = d.c;
+      const sp_approx = d.c;
+      tp_val = se_approx * prev * d.n;
+      fp_val = (1 - sp_approx) * (1 - prev) * d.n;
+    }
+    if (tp_val === null || fp_val === null) continue;
+    const nb = tp_val / d.n - fp_val / d.n * odds;
+    // SE of net benefit via delta method (approximate): SE ~ sqrt(Se*(1-Se)/events + Sp*(1-Sp)/nonevents * odds^2) / N
+    const se_val = d.events > 0 ? Math.sqrt(tp_val / d.n * (1 - tp_val / d.n) / d.events + fp_val / d.n * (1 - fp_val / d.n) / (d.n - d.events) * odds * odds) : 0.01;
+    results.push({ ...d, nb, nb_se: se_val, tp_used: tp_val, fp_used: fp_val });
+  }
+  return results;
+}
+
+function poolNetBenefit(data, method, thresholdPct) {
+  const nbData = computeNetBenefit(data, thresholdPct);
+  if (!nbData || nbData.length < 2) return null;
+  const pooled = rePool(nbData.map(d => d.nb), nbData.map(d => d.nb_se * d.nb_se), method);
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  const zc = normalQuantile(1 - alpha / 2);
+  return { ...pooled, nb: pooled.beta, ci: [pooled.beta - zc * pooled.se, pooled.beta + zc * pooled.se], threshold: thresholdPct, studies: nbData };
+}
+
+// Pool CITL on raw scale (CITL ~ 0 = perfect calibration)
+function poolCITL(data, method) {
+  // If CITL reported directly, use it. Otherwise derive from O:E
+  const prepared = [];
+  for (const d of data) {
+    let citl_val = null, citl_se_val = null;
+    if (isFinite(d.citl) && isFinite(d.citl_se) && d.citl_se > 0) {
+      citl_val = d.citl;
+      citl_se_val = d.citl_se;
+    } else if (isFinite(d.oe) && d.oe > 0 && isFinite(d.se_oe) && d.se_oe > 0) {
+      // Derive CITL from O:E: CITL ~ log(O/E) = log(OE) since OE = observed/expected
+      citl_val = Math.log(d.oe);
+      citl_se_val = d.se_oe; // SE on log scale already
+    }
+    if (citl_val !== null && citl_se_val !== null && citl_se_val > 0) {
+      prepared.push({ ...d, citl_used: citl_val, citl_se_used: citl_se_val });
+    }
+  }
+  if (prepared.length < 2) return null;
+  const pooled = rePool(prepared.map(d => d.citl_used), prepared.map(d => d.citl_se_used * d.citl_se_used), method);
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  const zc = normalQuantile(1 - alpha / 2);
+  return { ...pooled, citl: pooled.beta, ci: [pooled.beta - zc * pooled.se, pooled.beta + zc * pooled.se], studies: prepared };
+}
+
+// Leave-one-out sensitivity for pooled c
+function leaveOneOutC(data, method) {
+  const transform = document.getElementById('cTransform').value || 'logit';
+  const fullPool = poolCstatTransform(data, method, transform);
+  if (!fullPool || fullPool.k < 3) return null;
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  const results = [];
+  for (let i = 0; i < valid.length; i++) {
+    const subset = valid.filter((_, j) => j !== i);
+    if (subset.length < 2) continue;
+    const pool = poolCstatTransform(subset, method, transform);
+    if (!pool) continue;
+    const diff = pool.c - fullPool.c;
+    results.push({ excluded: valid[i].study, pooledC: pool.c, ci: pool.ci, I2: pool.I2, diff, influential: Math.abs(diff) > 0.01 });
+  }
+  return { fullC: fullPool.c, fullCI: fullPool.ci, results };
+}
+
+// Egger-style regression test for c-statistic funnel (radial version)
+function eggerTestC(data) {
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  if (valid.length < 3) return null;
+  // Radial Egger: regress z_i = c_i/SE_i on 1/SE_i. Intercept != 0 => asymmetry
+  const n = valid.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const d of valid) {
+    const x = 1 / d.se_c;
+    const y = d.c / d.se_c;
+    sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
+  }
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
+  // SE of intercept
+  let ssr = 0;
+  for (const d of valid) {
+    const x = 1 / d.se_c;
+    const predicted = intercept + slope * x;
+    const residual = d.c / d.se_c - predicted;
+    ssr += residual * residual;
+  }
+  const mse = ssr / (n - 2);
+  const se_intercept = Math.sqrt(mse * n / (n * sumX2 - sumX * sumX));
+  const t = intercept / se_intercept;
+  const p = 2 * (1 - tCDF(Math.abs(t), n - 2));
+  return { intercept, se_intercept, t, p, n, slope };
+}
+
+// Heterogeneity decomposition: meta-regression of logit(c) on log(N)
+function hetDecomposition(data, method) {
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0 && d.n > 0);
+  if (valid.length < 3) return null;
+  const transform = document.getElementById('cTransform').value || 'logit';
+  const tfn = transform === 'loglog' ? cTransformLoglog : transform === 'arcsine' ? cTransformArcsine : cTransformLogit;
+  const transformed = valid.map(d => {
+    const { theta, se } = tfn(d.c, d.se_c);
+    return { ...d, lc: theta, se_lc: se, v: se * se, logN: Math.log(d.n) };
+  });
+  // Unrestricted tau2 (no covariate)
+  const pooledFull = rePool(transformed.map(t => t.lc), transformed.map(t => t.v), method);
+  const tau2_total = pooledFull.tau2;
+  // Weighted least squares meta-regression: logit(c) = beta0 + beta1*log(N) + error
+  // Use method-of-moments tau2 from unrestricted model as starting point
+  let tau2_res = tau2_total;
+  for (let iter = 0; iter < 30; iter++) {
+    let sumW = 0, sumWX = 0, sumWY = 0, sumWX2 = 0, sumWXY = 0;
+    for (const t of transformed) {
+      const w = 1 / (t.v + tau2_res);
+      sumW += w; sumWX += w * t.logN; sumWY += w * t.lc;
+      sumWX2 += w * t.logN * t.logN; sumWXY += w * t.logN * t.lc;
+    }
+    const denom = sumW * sumWX2 - sumWX * sumWX;
+    if (Math.abs(denom) < 1e-15) break;
+    const b1 = (sumW * sumWXY - sumWX * sumWY) / denom;
+    const b0 = (sumWY - b1 * sumWX) / sumW;
+    let Qres = 0;
+    for (const t of transformed) {
+      const w = 1 / (t.v + tau2_res);
+      const pred = b0 + b1 * t.logN;
+      Qres += w * (t.lc - pred) * (t.lc - pred);
+    }
+    // Update tau2_res via DL-like estimator for residual heterogeneity
+    let sumW2_2 = 0;
+    for (const t of transformed) {
+      const w = 1 / (t.v + tau2_res);
+      sumW2_2 += w * w;
+    }
+    const C_res = sumW - sumW2_2 / sumW;
+    const tau2_new = Math.max(0, (Qres - (transformed.length - 2)) / C_res);
+    if (Math.abs(tau2_new - tau2_res) < 1e-8) { tau2_res = tau2_new; break; }
+    tau2_res = tau2_new;
+  }
+  // Final coefficients with converged tau2
+  let sumW = 0, sumWX = 0, sumWY = 0, sumWX2 = 0, sumWXY = 0;
+  for (const t of transformed) {
+    const w = 1 / (t.v + tau2_res);
+    sumW += w; sumWX += w * t.logN; sumWY += w * t.lc;
+    sumWX2 += w * t.logN * t.logN; sumWXY += w * t.logN * t.lc;
+  }
+  const denom = sumW * sumWX2 - sumWX * sumWX;
+  const beta1 = (sumW * sumWXY - sumWX * sumWY) / denom;
+  const beta0 = (sumWY - beta1 * sumWX) / sumW;
+  const se_beta1 = Math.sqrt(sumW / denom);
+  const z_beta1 = beta1 / se_beta1;
+  const p_beta1 = 2 * (1 - normalCDF(Math.abs(z_beta1)));
+  const R2 = tau2_total > 0 ? Math.max(0, 1 - tau2_res / tau2_total) * 100 : 0;
+  // Determine direction
+  const direction = beta1 > 0 ? 'larger studies show higher c' : 'smaller studies show higher c';
+  // By PROBAST: R2 for PROBAST covariate
+  let R2_probast = null;
+  const probastValues = transformed.map(t => t.probast === 'L' ? 0 : 1);
+  if (new Set(probastValues).size > 1) {
+    let tau2_rob = tau2_total;
+    for (let iter = 0; iter < 30; iter++) {
+      let sW = 0, sWX = 0, sWY = 0, sWX2 = 0, sWXY = 0;
+      for (let i = 0; i < transformed.length; i++) {
+        const w = 1 / (transformed[i].v + tau2_rob);
+        const x = probastValues[i];
+        sW += w; sWX += w * x; sWY += w * transformed[i].lc;
+        sWX2 += w * x * x; sWXY += w * x * transformed[i].lc;
+      }
+      const den = sW * sWX2 - sWX * sWX;
+      if (Math.abs(den) < 1e-15) break;
+      const b1r = (sW * sWXY - sWX * sWY) / den;
+      const b0r = (sWY - b1r * sWX) / sW;
+      let Qr = 0;
+      for (let i = 0; i < transformed.length; i++) {
+        const w = 1 / (transformed[i].v + tau2_rob);
+        const pred = b0r + b1r * probastValues[i];
+        Qr += w * (transformed[i].lc - pred) * (transformed[i].lc - pred);
+      }
+      let sW2 = 0;
+      for (let i = 0; i < transformed.length; i++) { const w = 1 / (transformed[i].v + tau2_rob); sW2 += w * w; }
+      const Cr = sW - sW2 / sW;
+      const t2n = Math.max(0, (Qr - (transformed.length - 2)) / Cr);
+      if (Math.abs(t2n - tau2_rob) < 1e-8) { tau2_rob = t2n; break; }
+      tau2_rob = t2n;
+    }
+    R2_probast = tau2_total > 0 ? Math.max(0, 1 - tau2_rob / tau2_total) * 100 : 0;
+  }
+  // By region (not available in current data, skip)
+  return { tau2_total, tau2_res, R2, beta0, beta1, se_beta1, z_beta1, p_beta1, direction, k: transformed.length, R2_probast, studies: transformed };
+}
+
 // ═══════════════════════════════════════════
 // ANALYSIS
 // ═══════════════════════════════════════════
@@ -602,7 +903,16 @@ function runAnalysis(){
   const cPoolLogit=poolCstatTransform(data,method,'logit');
   const cPoolLoglog=poolCstatTransform(data,method,'loglog');
   const cPoolArcsine=poolCstatTransform(data,method,'arcsine');
-  lastResults={data,cPool,oePool,calSlopePool,nriPool,subgroup,cPoolLogit,cPoolLoglog,cPoolArcsine};
+  // New analyses
+  const idiPool=poolIDI(data,method);
+  const thresholdPct=parseFloat(document.getElementById('nbThreshold').value)||10;
+  const nbPool=poolNetBenefit(data,method,thresholdPct);
+  const citlPool=poolCITL(data,method);
+  const loo=leaveOneOutC(data,method);
+  const hetDecomp=hetDecomposition(data,method);
+  const egger=eggerTestC(data);
+  lastResults={data,cPool,oePool,calSlopePool,nriPool,subgroup,cPoolLogit,cPoolLoglog,cPoolArcsine,
+    idiPool,nbPool,citlPool,loo,hetDecomp,egger};
   renderCstat();renderOE();renderProbast();renderCalSlope();renderForests();
   renderAdvanced();
   showTab('cstat');
@@ -779,6 +1089,13 @@ function renderAdvanced(){
   renderNRI();
   renderApplicability();
   renderSubgroup();
+  renderNewcombe();
+  renderIDI();
+  renderNetBenefit();
+  renderCITL();
+  renderFunnelC();
+  renderLOO();
+  renderHetDecomp();
 }
 
 function renderTransformCompare(){
@@ -1012,6 +1329,306 @@ function renderSubgroup(){
   } else {
     testEl.innerHTML='<p style="color:var(--text2)">Cannot test subgroup difference — need at least 2 studies in each subgroup.</p>';
   }
+}
+
+function renderNewcombe(){
+  const r=lastResults;
+  const el=document.getElementById('newcombeResults');
+  if(!r||!r.data){el.innerHTML='<p style="color:var(--text2)">Run analysis first.</p>';return}
+  const data=r.data;
+  // Show which studies used Newcombe vs CI-derived SE
+  let html='<table><thead><tr><th>Study</th><th>C</th><th>SE Source</th><th>SE(c)</th><th>Newcombe Var</th></tr></thead><tbody>';
+  let newcombeCount=0;
+  for(const d of data){
+    const hasCI=isFinite(d.clo)&&isFinite(d.chi)&&d.clo>0&&d.chi>0;
+    const nEvents=d.events;
+    const nNon=d.n-d.events;
+    const nVar=newcombeVariance(d.c,nEvents,nNon);
+    const source=hasCI?'CI-derived':'Newcombe approx';
+    if(!hasCI&&nVar!==null)newcombeCount++;
+    html+=`<tr><td>${d.study}</td><td>${d.c.toFixed(3)}</td><td>${source}</td><td>${d.se_c?d.se_c.toFixed(5):'—'}</td><td>${nVar!==null?nVar.toFixed(7):'—'}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  if(newcombeCount>0){
+    html=`<p style="margin-bottom:8px"><span class="badge badge-amber">${newcombeCount} ${newcombeCount===1?'study uses':'studies use'} Newcombe approximation</span> (CI not available)</p>`+html;
+  } else {
+    html=`<p style="margin-bottom:8px"><span class="badge badge-green">All studies have CI-derived SE</span> — Newcombe approximation not needed but shown for comparison</p>`+html;
+  }
+  el.innerHTML=html;
+}
+
+function renderIDI(){
+  const r=lastResults;
+  const el=document.getElementById('idiResults');
+  if(!r||!r.idiPool){el.innerHTML='<p style="color:var(--text2)">No IDI data provided. Add IDI and IDI_SE as optional columns 18-19 after Applicability.</p>';return}
+  const idi=r.idiPool;
+  const badge=idi.idi>0?'badge-green':'badge-red';
+  const sig=idi.p<0.05?'Significant':'Not significant';
+  el.innerHTML=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value"><span class="badge ${badge}">${idi.idi.toFixed(4)}</span></div><div class="label">Pooled IDI</div></div>
+      <div class="stat-box"><div class="value">${idi.ci[0].toFixed(4)} – ${idi.ci[1].toFixed(4)}</div><div class="label">95% CI</div></div>
+      <div class="stat-box"><div class="value">${idi.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+      <div class="stat-box"><div class="value">${idi.p.toFixed(4)}</div><div class="label">P-value (${sig})</div></div>
+      <div class="stat-box"><div class="value">${idi.k}</div><div class="label">Studies Pooled</div></div>
+      <div class="stat-box"><div class="value">${idi.tau2.toFixed(6)}</div><div class="label">tau-squared</div></div>
+    </div>
+    <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">IDI > 0 means the new model improves discrimination on average. Pooled on raw (linear) scale.</p>`;
+}
+
+function renderNetBenefit(){
+  const r=lastResults;
+  const el=document.getElementById('netBenefitResults');
+  if(!r||!r.data){el.innerHTML='<p style="color:var(--text2)">Run analysis first.</p>';return}
+  const method=document.getElementById('poolMethod').value;
+  const thresholdPct=parseFloat(document.getElementById('nbThreshold').value)||10;
+  const nbPool=poolNetBenefit(r.data,method,thresholdPct);
+  // Update stored result
+  if(r)r.nbPool=nbPool;
+  if(!nbPool){el.innerHTML='<p style="color:var(--text2)">Insufficient data for net benefit pooling. Need at least 2 studies with TP/FP or events/c-stat data.</p>';return}
+  const nb100=(nbPool.nb*100).toFixed(2);
+  const lo100=(nbPool.ci[0]*100).toFixed(2);
+  const hi100=(nbPool.ci[1]*100).toFixed(2);
+  const badge=nbPool.nb>0?'badge-green':'badge-red';
+  el.innerHTML=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value"><span class="badge ${badge}">${nbPool.nb.toFixed(4)}</span></div><div class="label">Pooled Net Benefit</div></div>
+      <div class="stat-box"><div class="value">${nbPool.ci[0].toFixed(4)} – ${nbPool.ci[1].toFixed(4)}</div><div class="label">95% CI</div></div>
+      <div class="stat-box"><div class="value">${nbPool.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+      <div class="stat-box"><div class="value">${nbPool.k}</div><div class="label">Studies Pooled</div></div>
+    </div>
+    <div class="pi-box" style="margin-top:12px">
+      <div class="pi-label">Clinical Interpretation at ${thresholdPct}% Threshold</div>
+      <div class="pi-value">At threshold ${thresholdPct}%, the model provides net benefit of ${nb100} per 100 patients (95% CI: ${lo100} to ${hi100})</div>
+      <div class="pi-note">${nbPool.nb>0?'Positive net benefit: using the model is better than treating all or none.':'Negative net benefit: the model may not improve clinical decisions at this threshold.'}</div>
+    </div>
+    <table style="margin-top:12px"><thead><tr><th>Study</th><th>N</th><th>TP</th><th>FP</th><th>Net Benefit</th><th>Weight</th></tr></thead><tbody>
+    ${nbPool.studies.map((s,i)=>`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${Math.round(s.tp_used)}</td><td>${Math.round(s.fp_used)}</td><td>${s.nb.toFixed(4)}</td><td>${nbPool.weights[i].toFixed(1)}%</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+function renderCITL(){
+  const r=lastResults;
+  const el=document.getElementById('citlResults');
+  if(!r||!r.citlPool){el.innerHTML='<p style="color:var(--text2)">No CITL data. Provide CITL + CITL_SE as columns 20-21, or O:E ratio data (CITL derived as log(O:E)).</p>';return}
+  const citl=r.citlPool;
+  const cal=Math.abs(citl.citl)<0.05?'Well calibrated':citl.citl>0?'Under-prediction (O > E)':'Over-prediction (O < E)';
+  const badge=Math.abs(citl.citl)<0.05?'badge-green':Math.abs(citl.citl)<0.15?'badge-amber':'badge-red';
+  el.innerHTML=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${citl.citl.toFixed(4)}</div><div class="label">Pooled CITL</div></div>
+      <div class="stat-box"><div class="value">${citl.ci[0].toFixed(4)} – ${citl.ci[1].toFixed(4)}</div><div class="label">95% CI</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${badge}">${cal}</span></div><div class="label">Interpretation</div></div>
+      <div class="stat-box"><div class="value">${citl.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+      <div class="stat-box"><div class="value">${citl.k}</div><div class="label">Studies Pooled</div></div>
+      <div class="stat-box"><div class="value">${citl.tau2.toFixed(6)}</div><div class="label">tau-squared</div></div>
+    </div>
+    <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">CITL = 0 means perfect calibration-in-the-large. CITL > 0 implies the model under-predicts (observed > expected). CITL < 0 implies over-prediction.</p>
+    <table style="margin-top:12px"><thead><tr><th>Study</th><th>CITL</th><th>SE</th><th>Source</th><th>Weight</th></tr></thead><tbody>
+    ${citl.studies.map((s,i)=>`<tr><td>${s.study}</td><td>${s.citl_used.toFixed(4)}</td><td>${s.citl_se_used.toFixed(4)}</td><td>${isFinite(s.citl)?'Reported':'Derived from O:E'}</td><td>${citl.weights[i].toFixed(1)}%</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+function renderFunnelC(){
+  const r=lastResults;
+  const canvas=document.getElementById('funnelCCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  if(!r||!r.cPool){ctx.fillStyle='#94a3b8';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText('Run analysis first.',W/2,H/2);return}
+  const cp=r.cPool;
+  const data=r.data.filter(d=>d.c>0.5&&d.c<1&&d.se_c>0);
+  if(data.length<3){ctx.fillStyle='#94a3b8';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText('Need at least 3 studies for funnel plot.',W/2,H/2);return}
+  const pad={top:50,right:50,bottom:60,left:70};
+  const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
+  const cVals=data.map(d=>d.c),seVals=data.map(d=>d.se_c);
+  const seMax=Math.max(...seVals)*1.2;
+  const cMin=Math.min(cp.c-1.96*seMax,...cVals)-0.02;
+  const cMax=Math.max(cp.c+1.96*seMax,...cVals)+0.02;
+  const xScale=v=>pad.left+((v-cMin)/(cMax-cMin))*pw;
+  const yScale=v=>pad.top+((v)/seMax)*ph;// SE=0 at top, SE=max at bottom
+  // Pseudo-CI funnel lines
+  ctx.strokeStyle='rgba(139,92,246,0.3)';ctx.lineWidth=1;ctx.setLineDash([6,4]);
+  const steps=50;
+  ctx.beginPath();
+  for(let i=0;i<=steps;i++){
+    const se=seMax*i/steps;
+    const lo=cp.c-1.96*se;
+    ctx.lineTo(xScale(lo),yScale(se));
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  for(let i=0;i<=steps;i++){
+    const se=seMax*i/steps;
+    const hi=cp.c+1.96*se;
+    ctx.lineTo(xScale(hi),yScale(se));
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Vertical line at pooled c
+  ctx.strokeStyle='#8b5cf6';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(xScale(cp.c),pad.top);ctx.lineTo(xScale(cp.c),H-pad.bottom);ctx.stroke();
+  // Axes
+  ctx.strokeStyle='#2a3450';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad.left,pad.top);ctx.lineTo(pad.left,H-pad.bottom);ctx.lineTo(W-pad.right,H-pad.bottom);ctx.stroke();
+  // X axis ticks
+  ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='center';
+  for(let i=0;i<=5;i++){
+    const v=cMin+(cMax-cMin)*i/5;
+    const x=xScale(v);
+    ctx.beginPath();ctx.moveTo(x,H-pad.bottom);ctx.lineTo(x,H-pad.bottom+5);ctx.stroke();
+    ctx.fillText(v.toFixed(3),x,H-pad.bottom+18);
+  }
+  // Y axis ticks (inverted: 0 at top)
+  ctx.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const v=seMax*i/4;
+    const y=yScale(v);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(pad.left-5,y);ctx.stroke();
+    ctx.fillText(v.toFixed(3),pad.left-8,y+4);
+  }
+  // Axis labels
+  ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+  ctx.fillText('C-statistic',pad.left+pw/2,H-10);
+  ctx.save();ctx.translate(15,pad.top+ph/2);ctx.rotate(-Math.PI/2);ctx.fillText('SE(c)',0,0);ctx.restore();
+  // Title
+  ctx.fillStyle='#a78bfa';ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Discrimination Funnel Plot',W/2,25);
+  // Points colored by PROBAST
+  const robColors={L:'#22c55e',H:'#ef4444',U:'#f59e0b'};
+  data.forEach(d=>{
+    const x=xScale(d.c),y=yScale(d.se_c);
+    ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.fillStyle=robColors[d.probast]||robColors.U;ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=0.5;ctx.stroke();
+    // Label
+    ctx.fillStyle='#94a3b8';ctx.font='8px sans-serif';ctx.textAlign='center';
+    ctx.fillText(d.study,x,y-8);
+  });
+  // Legend
+  const lx=W-pad.right-130,ly=pad.top+10;
+  [['Low RoB','L'],['High RoB','H'],['Unclear','U']].forEach(([lab,key],i)=>{
+    const cy=ly+i*16;
+    ctx.beginPath();ctx.arc(lx,cy,4,0,Math.PI*2);ctx.fillStyle=robColors[key];ctx.fill();
+    ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillText(lab,lx+10,cy+4);
+  });
+  // Egger test result
+  const eggerEl=document.getElementById('eggerResult');
+  const egger=r.egger;
+  if(egger){
+    const sig=egger.p<0.1?'badge-red':'badge-green';
+    const sigText=egger.p<0.1?'Asymmetry detected (P < 0.1)':'No significant asymmetry';
+    eggerEl.innerHTML=`<p style="font-size:0.88rem">Egger regression test: intercept = ${egger.intercept.toFixed(3)} (SE = ${egger.se_intercept.toFixed(3)}), t = ${egger.t.toFixed(2)}, P = ${egger.p.toFixed(4)} <span class="badge ${sig}">${sigText}</span></p>
+    <p style="font-size:0.82rem;color:var(--text2);margin-top:4px">${egger.n} studies. ${egger.p<0.1?'Small-study effects may be present — interpret pooled c with caution.':'No evidence of small-study effects.'} Note: Egger test has low power for k < 10.</p>`;
+  } else {
+    eggerEl.innerHTML='<p style="color:var(--text2)">Need at least 3 studies for Egger test.</p>';
+  }
+}
+
+function renderLOO(){
+  const r=lastResults;
+  const el=document.getElementById('looResults');
+  const canvas=document.getElementById('looCCanvas');
+  if(!r||!r.loo){
+    el.innerHTML='<p style="color:var(--text2)">Need at least 3 studies for leave-one-out analysis.</p>';
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  const loo=r.loo;
+  // Table
+  let html='<table><thead><tr><th>Study Excluded</th><th>Pooled C</th><th>95% CI</th><th>I-squared</th><th>Change</th><th>Influential?</th></tr></thead><tbody>';
+  for(const row of loo.results){
+    const cls=row.influential?'influential':'';
+    const badge=row.influential?'<span class="badge badge-red">Yes</span>':'<span class="badge badge-green">No</span>';
+    html+=`<tr class="${cls}"><td>${row.excluded}</td><td>${row.pooledC.toFixed(4)}</td><td>${row.ci[0].toFixed(4)} – ${row.ci[1].toFixed(4)}</td><td>${row.I2.toFixed(1)}%</td><td>${row.diff>=0?'+':''}${row.diff.toFixed(4)}</td><td>${badge}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  const influential=loo.results.filter(r2=>r2.influential);
+  if(influential.length>0){
+    html=`<p style="margin-bottom:8px"><span class="badge badge-amber">${influential.length} influential ${influential.length===1?'study':'studies'}</span> shift pooled c by > 0.01: ${influential.map(r2=>r2.excluded).join(', ')}</p>`+html;
+  } else {
+    html=`<p style="margin-bottom:8px"><span class="badge badge-green">No single study shifts pooled c by more than 0.01</span> — results are robust.</p>`+html;
+  }
+  el.innerHTML=html;
+  // LOO Forest Plot
+  const results=loo.results;
+  const rows=results.length+1;
+  canvas.height=Math.max(300,rows*28+100);
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H2=canvas.height;
+  ctx.clearRect(0,0,W,H2);
+  const pad={top:40,right:140,bottom:40,left:200};
+  const pw=W-pad.left-pad.right;
+  const rowH=24;
+  const allC=[loo.fullCI[0],loo.fullCI[1],...results.flatMap(r2=>[r2.ci[0],r2.ci[1]])];
+  const cMin2=Math.min(...allC.filter(isFinite))*0.998;
+  const cMax2=Math.min(Math.max(...allC.filter(isFinite))*1.002,1);
+  const xScale=v=>pad.left+((v-cMin2)/(cMax2-cMin2))*pw;
+  // Vertical reference at full pooled c
+  ctx.strokeStyle='#8b5cf6';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(xScale(loo.fullC),pad.top);ctx.lineTo(xScale(loo.fullC),H2-pad.bottom);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#94a3b8';ctx.font='bold 11px sans-serif';ctx.textAlign='left';
+  ctx.fillText('Omitted Study',10,pad.top-10);
+  ctx.textAlign='center';ctx.fillText('Pooled C (leave-one-out)',pad.left+pw/2,pad.top-10);
+  results.forEach((row,i)=>{
+    const y=pad.top+10+i*rowH;
+    const color=row.influential?'#ef4444':'#a78bfa';
+    ctx.strokeStyle=color;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(xScale(row.ci[0]),y);ctx.lineTo(xScale(row.ci[1]),y);ctx.stroke();
+    const sz=5;
+    ctx.fillStyle=color;ctx.fillRect(xScale(row.pooledC)-sz/2,y-sz/2,sz,sz);
+    ctx.fillStyle='#e2e8f0';ctx.font='11px sans-serif';ctx.textAlign='right';
+    ctx.fillText(row.excluded,pad.left-8,y+4);
+    ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+    ctx.fillText(`${row.pooledC.toFixed(4)} [${row.ci[0].toFixed(4)}, ${row.ci[1].toFixed(4)}]`,W-pad.right+5,y+4);
+  });
+  // Full pooled at bottom
+  const divY=pad.top+10+results.length*rowH+8;
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,divY);ctx.lineTo(W-10,divY);ctx.stroke();
+  const yFull=divY+20;
+  const cx=xScale(loo.fullC),lx=xScale(loo.fullCI[0]),rx=xScale(loo.fullCI[1]);
+  ctx.beginPath();ctx.moveTo(lx,yFull);ctx.lineTo(cx,yFull-6);ctx.lineTo(rx,yFull);ctx.lineTo(cx,yFull+6);ctx.closePath();
+  ctx.fillStyle='#8b5cf6';ctx.globalAlpha=0.7;ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle='#8b5cf6';ctx.font='bold 11px sans-serif';ctx.textAlign='right';
+  ctx.fillText('All studies',pad.left-8,yFull+4);
+  ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+  ctx.fillText(`${loo.fullC.toFixed(4)} [${loo.fullCI[0].toFixed(4)}, ${loo.fullCI[1].toFixed(4)}]`,W-pad.right+5,yFull+4);
+}
+
+function renderHetDecomp(){
+  const r=lastResults;
+  const el=document.getElementById('hetDecompResults');
+  if(!r||!r.hetDecomp){el.innerHTML='<p style="color:var(--text2)">Need at least 3 studies for heterogeneity decomposition.</p>';return}
+  const hd=r.hetDecomp;
+  const r2Badge=hd.R2>50?'badge-red':hd.R2>25?'badge-amber':'badge-green';
+  const r2Text=hd.R2>50?'Substantial — sample size explains much of the heterogeneity (spectrum effect likely)':hd.R2>25?'Moderate — sample size partially explains heterogeneity':'Low — sample size does not explain heterogeneity';
+  let html=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${hd.tau2_total.toFixed(6)}</div><div class="label">tau-squared (total)</div></div>
+      <div class="stat-box"><div class="value">${hd.tau2_res.toFixed(6)}</div><div class="label">tau-squared (residual)</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${r2Badge}">${hd.R2.toFixed(1)}%</span></div><div class="label">R-squared (sample size)</div></div>
+      <div class="stat-box"><div class="value">${hd.beta1.toFixed(4)}</div><div class="label">beta(log N) — slope</div></div>
+      <div class="stat-box"><div class="value">${hd.p_beta1.toFixed(4)}</div><div class="label">P-value (slope)</div></div>
+      <div class="stat-box"><div class="value">${hd.k}</div><div class="label">Studies</div></div>
+    </div>
+    <div class="decomp-bar">
+      <div class="explained" style="width:${hd.R2}%" title="Explained by sample size: ${hd.R2.toFixed(1)}%"></div>
+      <div class="unexplained" style="width:${100-hd.R2}%" title="Unexplained: ${(100-hd.R2).toFixed(1)}%"></div>
+    </div>
+    <p style="font-size:0.82rem;color:var(--text2)"><span style="color:var(--accent)">&#9632;</span> Explained by log(N): ${hd.R2.toFixed(1)}% | <span style="color:var(--text2)">&#9632;</span> Unexplained: ${(100-hd.R2).toFixed(1)}%</p>
+    <p style="font-size:0.85rem;margin-top:8px">${r2Text}</p>
+    <p style="font-size:0.82rem;color:var(--text2);margin-top:4px">Direction: ${hd.direction} (beta = ${hd.beta1.toFixed(4)}, P = ${hd.p_beta1.toFixed(4)})</p>`;
+  if(hd.R2_probast!==null){
+    const r2pBadge=hd.R2_probast>50?'badge-red':hd.R2_probast>25?'badge-amber':'badge-green';
+    html+=`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <p style="font-size:0.88rem;font-weight:600;color:var(--accent2)">PROBAST as covariate</p>
+      <p>R-squared (PROBAST): <span class="badge ${r2pBadge}">${hd.R2_probast.toFixed(1)}%</span></p>
+      <p style="font-size:0.82rem;color:var(--text2)">Proportion of heterogeneity explained by high/unclear vs low risk of bias.</p>
+    </div>`;
+  }
+  el.innerHTML=html;
 }
 
 function renderForests(){
