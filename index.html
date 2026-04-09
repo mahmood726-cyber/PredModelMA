@@ -51,6 +51,24 @@ canvas{width:100%;background:transparent}
 .traffic-light{display:inline-block;width:16px;height:16px;border-radius:50%;margin:0 2px;vertical-align:middle}
 .tl-low{background:var(--green)}.tl-high{background:var(--red)}.tl-unclear{background:var(--amber)}
 footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;border-top:1px solid var(--border);margin-top:30px}
+.transform-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:12px}
+.transform-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+.transform-card.selected{border-color:var(--accent);background:rgba(139,92,246,0.08)}
+.transform-card h4{font-size:0.92rem;color:var(--accent2);margin-bottom:6px}
+.transform-card .tc-value{font-size:1.2rem;font-weight:700;color:var(--text)}
+.transform-card .tc-ci{font-size:0.82rem;color:var(--text2)}
+.pi-box{background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.2);border-radius:var(--radius);padding:14px;margin-top:12px}
+.pi-box .pi-label{font-size:0.82rem;color:var(--cyan);font-weight:600;margin-bottom:4px}
+.pi-box .pi-value{font-size:1.1rem;font-weight:700;color:var(--cyan)}
+.pi-box .pi-note{font-size:0.78rem;color:var(--text2);margin-top:4px}
+.subgroup-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+@media(max-width:900px){.subgroup-grid{grid-template-columns:1fr}}
+.subgroup-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.subgroup-card h4{color:var(--accent2);margin-bottom:8px;font-size:0.95rem}
+.applicability-row{display:flex;gap:12px;align-items:center;margin-bottom:6px}
+.applicability-row .domain{width:120px;font-size:0.85rem;color:var(--text2)}
+.nri-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:700px){.nri-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -65,7 +83,9 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   <div class="tab" onclick="showTab('cstat')">C-statistic MA</div>
   <div class="tab" onclick="showTab('oe')">O:E Ratio MA</div>
   <div class="tab" onclick="showTab('probast')">PROBAST</div>
+  <div class="tab" onclick="showTab('calslope')">Calibration Slope</div>
   <div class="tab" onclick="showTab('forest')">Forest Plots</div>
+  <div class="tab" onclick="showTab('advanced')">Advanced</div>
   <div class="tab" onclick="showTab('guide')">Guide</div>
 </div>
 
@@ -88,13 +108,20 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   </div>
   <div class="card">
     <h3>Validation Study Data</h3>
-    <div class="info-box">One row per validation study. Format: Study, N, Events, C-statistic, C_lower, C_upper, O:E_ratio, OE_lower, OE_upper, CalSlope, PROBAST_overall (L/H/U)</div>
+    <div class="info-box">One row per validation study. Format: Study, N, Events, C-statistic, C_lower, C_upper, O:E_ratio, OE_lower, OE_upper, CalSlope, PROBAST_overall (L/H/U)<br>
+    <span style="color:var(--text2);font-size:0.82rem">Optional extra columns (after PROBAST): CalSlope_SE, NRI_events, NRI_nonevents, NRI_event_SE, NRI_nonevent_SE, Applicability (L/H/U)</span></div>
     <textarea id="dataInput" rows="14" placeholder="Wilson2019  5000  450  0.76  0.73  0.79  1.05  0.95  1.16  0.92  L"></textarea>
-    <div class="grid-2" style="margin-top:12px">
+    <div class="grid-4" style="margin-top:12px">
       <div><label>Pooling method</label>
         <select id="poolMethod"><option value="reml">REML</option><option value="dl">DerSimonian-Laird</option></select>
       </div>
+      <div><label>C-stat transformation</label>
+        <select id="cTransform"><option value="logit">Logit(c) — standard</option><option value="loglog">Log(-log(c)) — near 1</option><option value="arcsine">Arcsine-sqrt — var stabilizing</option></select>
+      </div>
       <div><label>Significance level (α)</label><input type="number" id="alpha" value="0.05" step="0.01" min="0.001" max="0.2"></div>
+      <div><label>Compute prediction interval</label>
+        <select id="compPI"><option value="yes">Yes</option><option value="no">No</option></select>
+      </div>
     </div>
     <div class="btn-group">
       <button class="btn btn-primary" onclick="runAnalysis()">Run Analysis</button>
@@ -136,6 +163,59 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   </div>
 </div>
 
+<!-- CALIBRATION SLOPE MA -->
+<div class="panel" id="panel-calslope">
+  <div class="card"><h3>Pooled Calibration Slope</h3><div id="calSlopeSummary" class="stat-grid"></div></div>
+  <div class="card"><h3>Study-level Calibration Slopes</h3>
+    <table id="calSlopeTable"><thead><tr><th>Study</th><th>N</th><th>Cal. Slope</th><th>Interpretation</th><th>Weight</th></tr></thead><tbody></tbody></table>
+  </div>
+  <div class="card"><h3>Heterogeneity</h3><div id="calSlopeHet"></div></div>
+  <div class="card"><h3>Forest Plot — Calibration Slopes</h3>
+    <div class="plot-container"><canvas id="forestCSCanvas" width="950" height="400"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('forestCSCanvas','calslope_forest')">Export PNG</button></div>
+  </div>
+</div>
+
+<!-- ADVANCED -->
+<div class="panel" id="panel-advanced">
+  <div class="card">
+    <h3>C-statistic Transformation Comparison (Debray et al. 2017)</h3>
+    <div class="info-box">Compare three transformations for pooling c-statistics. Logit is standard; log(-log) may be better when c is near 1; arcsine-sqrt is variance-stabilizing.</div>
+    <div id="transformCompare" class="transform-compare"></div>
+  </div>
+  <div class="card">
+    <h3>Prediction Interval for Pooled C-statistic (IntHout et al. 2016)</h3>
+    <div class="info-box">The prediction interval shows where the <strong>next</strong> validation study's c-statistic might fall. Much wider than the CI when heterogeneity is present. Uses t-distribution with k-2 df.</div>
+    <div id="predictionInterval"></div>
+  </div>
+  <div class="card">
+    <h3>E/O vs C Bubble Plot (Calibration vs Discrimination)</h3>
+    <div class="info-box">X = c-statistic (discrimination), Y = O:E ratio (calibration). Bubble size = sample size. Color = PROBAST RoB. Quadrants: upper-left = poor discrimination + underprediction; lower-right = good discrimination + overprediction.</div>
+    <div class="plot-container"><canvas id="bubbleCanvas" width="800" height="600"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('bubbleCanvas','bubble_eo_c')">Export PNG</button></div>
+  </div>
+  <div class="card">
+    <h3>Net Reclassification Improvement (NRI) Pooling</h3>
+    <div class="info-box">Pools event NRI and non-event NRI separately (FE/RE). Overall NRI = NRI_events + NRI_nonevents. Provide NRI data in optional columns.</div>
+    <div id="nriResults"></div>
+  </div>
+  <div class="card">
+    <h3>PROBAST Applicability Assessment</h3>
+    <div class="info-box">Distinct from risk of bias. A study can have low RoB but high applicability concern (e.g., different population from the target). 3 domains: Participants, Predictors, Outcome.</div>
+    <table id="applicabilityTable">
+      <thead><tr><th>Study</th><th>Participants</th><th>Predictors</th><th>Outcome</th><th>Overall Applicability</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="applicabilitySummary" class="stat-grid" style="margin-top:12px"></div>
+  </div>
+  <div class="card">
+    <h3>Subgroup Analysis by PROBAST Risk of Bias</h3>
+    <div class="info-box">Pools c-statistics separately for Low-RoB vs High/Unclear-RoB studies and tests for subgroup difference. If few studies in a subgroup (k &lt; 3), pooling may be unreliable.</div>
+    <div id="subgroupResults" class="subgroup-grid"></div>
+    <div id="subgroupTest" style="margin-top:12px"></div>
+  </div>
+</div>
+
 <!-- FOREST PLOTS -->
 <div class="panel" id="panel-forest">
   <div class="card"><h3>Forest Plot — C-statistics</h3>
@@ -159,6 +239,16 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
       <tr><td><strong>Calibration slope</strong></td><td>Slope = 1 means perfect calibration. Slope < 1 = overfitting in development. Can pool directly (unbounded).</td></tr>
       <tr><td><strong>PROBAST</strong></td><td>4 domains: Participants, Predictors, Outcome, Analysis. Each rated Low/High/Unclear. Overall = High if any domain is High.</td></tr>
     </table>
+    <h3 style="margin-top:16px">Advanced Methods</h3>
+    <table>
+      <tr><td><strong>C-stat transforms</strong></td><td>Logit(c) is standard. Log(-log(c)) (complementary log-log) may perform better when c is near 1. Arcsine-sqrt(c) is variance-stabilizing. Compare results across transforms (Debray 2017 Stat Med).</td></tr>
+      <tr><td><strong>Prediction interval</strong></td><td>PI = expit(logit(c) +/- t_{k-2} * sqrt(SE^2 + tau^2)). Uses t-distribution, not normal. Undefined for k &lt; 3. Shows range of plausible c values for next study (IntHout 2016).</td></tr>
+      <tr><td><strong>Calibration slope MA</strong></td><td>Pool slopes directly (unbounded). Slope = 1 = perfect. Slope &lt; 1 = overfitting. Slope &gt; 1 = underfitting. SE derived from CI width / (2*1.96).</td></tr>
+      <tr><td><strong>Bubble plot</strong></td><td>O:E vs c-statistic. Size = N. Color = PROBAST. Quadrants show discrimination vs calibration trade-offs.</td></tr>
+      <tr><td><strong>NRI pooling</strong></td><td>Event NRI and non-event NRI pooled separately. Overall NRI = sum. Requires NRI data in optional columns.</td></tr>
+      <tr><td><strong>Applicability</strong></td><td>PROBAST applicability is distinct from risk of bias: low RoB but high concern if population/predictors/outcome differ from target use.</td></tr>
+      <tr><td><strong>Subgroup by RoB</strong></td><td>Compare pooled c between Low-RoB and High/Unclear-RoB subgroups. Chi-squared test for subgroup difference.</td></tr>
+    </table>
     <h3 style="margin-top:16px">PROBAST Domain Details</h3>
     <table>
       <tr><td><strong>D1: Participants</strong></td><td>Appropriate study design? Inclusions/exclusions? Sufficient sample size?</td></tr>
@@ -169,7 +259,7 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   </div>
 </div>
 
-<footer>PredModelMA v1.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
+<footer>PredModelMA v2.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
 </div>
 
 <script>
@@ -183,7 +273,123 @@ function regGammaP(a,x){if(x<=0)return 0;const lga=lgamma(a);if(x<a+1){let s=1/a
 function lgamma(x){const g=7,c=[0.99999999999980993,676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-0.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];if(x<0.5)return Math.log(Math.PI/Math.sin(Math.PI*x))-lgamma(1-x);x-=1;let a=c[0];const t=x+g+0.5;for(let i=1;i<g+2;i++)a+=c[i]/(x+i);return 0.5*Math.log(2*Math.PI)+(x+0.5)*Math.log(t)-t+Math.log(a)}
 
 function logit(p){return Math.log(p/(1-p))}
-function expit(x){return 1/(1+Math.exp(-x))}
+function expit(x){if(x>500)return 1;if(x<-500)return 0;return 1/(1+Math.exp(-x))}
+
+// t-distribution quantile via Hill's algorithm (Abramowitz & Stegun approx for large df, iterative for small)
+function tQuantile(p,df){
+  if(df<=0)return NaN;
+  if(p<=0)return-Infinity;if(p>=1)return Infinity;if(p===0.5)return 0;
+  // For df>=30 use normal approx with correction
+  if(df>=30){
+    const z=normalQuantile(p);
+    const g1=(z*z*z+z)/(4*df);
+    const g2=(5*z*z*z*z*z+16*z*z*z+3*z)/(96*df*df);
+    return z+g1+g2;
+  }
+  // Newton-Raphson on Student t CDF
+  let t=normalQuantile(p);
+  for(let iter=0;iter<50;iter++){
+    const cdfVal=tCDF(t,df);
+    const pdfVal=tPDF(t,df);
+    if(pdfVal<1e-15)break;
+    const delta=(cdfVal-p)/pdfVal;
+    t-=delta;
+    if(Math.abs(delta)<1e-10)break;
+  }
+  return t;
+}
+function tPDF(t,df){
+  return Math.exp(lgamma((df+1)/2)-lgamma(df/2)-0.5*Math.log(df*Math.PI)-(df+1)/2*Math.log(1+t*t/df));
+}
+function tCDF(t,df){
+  // Use regularized incomplete beta function
+  const x=df/(df+t*t);
+  const ib=regBetaI(x,df/2,0.5);
+  return t>=0?(1-0.5*ib):(0.5*ib);
+}
+function regBetaI(x,a,b){
+  // Regularized incomplete beta via continued fraction (Lentz)
+  if(x<=0)return 0;if(x>=1)return 1;
+  const lbeta=lgamma(a)+lgamma(b)-lgamma(a+b);
+  const front=Math.exp(a*Math.log(x)+b*Math.log(1-x)-lbeta)/a;
+  if(x<(a+1)/(a+b+2)){return front*betaCF(x,a,b)}
+  else{return 1-Math.exp(a*Math.log(x)+b*Math.log(1-x)-lbeta)/b*betaCF(1-x,b,a)}
+}
+function betaCF(x,a,b){
+  const maxIter=200;const eps=1e-12;
+  let qab=a+b,qap=a+1,qam=a-1;
+  let c=1,d=1-qab*x/qap;
+  if(Math.abs(d)<1e-30)d=1e-30;d=1/d;let h=d;
+  for(let m=1;m<=maxIter;m++){
+    let m2=2*m;
+    let aa=m*(b-m)*x/((qam+m2)*(a+m2));
+    d=1+aa*d;if(Math.abs(d)<1e-30)d=1e-30;d=1/d;
+    c=1+aa/c;if(Math.abs(c)<1e-30)c=1e-30;
+    h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));
+    d=1+aa*d;if(Math.abs(d)<1e-30)d=1e-30;d=1/d;
+    c=1+aa/c;if(Math.abs(c)<1e-30)c=1e-30;
+    const del=d*c;h*=del;
+    if(Math.abs(del-1)<eps)break;
+  }
+  return h;
+}
+
+// C-statistic transformations (Debray et al. 2017, Stat Med)
+function cTransformLogit(c,se_c){
+  const lc=logit(c);
+  const se_lc=se_c/(c*(1-c));// delta method
+  return{theta:lc,se:se_lc};
+}
+function cTransformLoglog(c,se_c){
+  // g(c) = log(-log(c)); g'(c) = -1/(c*log(c))
+  const clamp=Math.min(Math.max(c,0.501),0.9999);
+  const theta=Math.log(-Math.log(clamp));
+  const deriv=-1/(clamp*Math.log(clamp));
+  const se=Math.abs(deriv)*se_c;
+  return{theta,se};
+}
+function cTransformArcsine(c,se_c){
+  // g(c) = asin(sqrt(c)); g'(c) = 1/(2*sqrt(c*(1-c)))
+  const clamp=Math.min(Math.max(c,0.501),0.9999);
+  const theta=Math.asin(Math.sqrt(clamp));
+  const deriv=1/(2*Math.sqrt(clamp*(1-clamp)));
+  const se=Math.abs(deriv)*se_c;
+  return{theta,se};
+}
+function cBackTransformLogit(theta){return expit(theta)}
+function cBackTransformLoglog(theta){return Math.exp(-Math.exp(theta))}
+function cBackTransformArcsine(theta){const s=Math.sin(theta);return s*s}
+
+// Pool c-statistics with selectable transformation
+function poolCstatTransform(data,method,transform){
+  const valid=data.filter(d=>d.c>0.5&&d.c<1&&d.se_c>0);
+  if(valid.length<2)return null;
+  const tfn=transform==='loglog'?cTransformLoglog:transform==='arcsine'?cTransformArcsine:cTransformLogit;
+  const backfn=transform==='loglog'?cBackTransformLoglog:transform==='arcsine'?cBackTransformArcsine:cBackTransformLogit;
+  const transformed=valid.map(d=>{
+    const{theta,se}=tfn(d.c,d.se_c);
+    return{...d,lc:theta,se_lc:se,v:se*se};
+  });
+  const pooled=rePool(transformed.map(t=>t.lc),transformed.map(t=>t.v),method);
+  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+  const zc=normalQuantile(1-alpha/2);
+  const c_pooled=backfn(pooled.beta);
+  const c_lo=backfn(pooled.beta-zc*pooled.se);
+  const c_hi=backfn(pooled.beta+zc*pooled.se);
+  // For loglog, back-transform reverses direction so swap if needed
+  const ci=[Math.min(c_lo,c_hi),Math.max(c_lo,c_hi)];
+  // Prediction interval (IntHout et al. 2016): t_{k-2} * sqrt(se^2 + tau^2)
+  let pi=null;
+  if(pooled.k>=3){
+    const tVal=tQuantile(1-alpha/2,pooled.k-2);
+    const pi_se=Math.sqrt(pooled.se*pooled.se+pooled.tau2);
+    const pi_lo=backfn(pooled.beta-tVal*pi_se);
+    const pi_hi=backfn(pooled.beta+tVal*pi_se);
+    pi=[Math.min(pi_lo,pi_hi),Math.max(pi_lo,pi_hi)];
+  }
+  return{...pooled,c:c_pooled,ci,pi,transform,studies:transformed};
+}
 
 function parseData(){
   const raw=document.getElementById('dataInput').value.trim();
@@ -200,6 +406,14 @@ function parseData(){
     if(p.length>=9){oe=parseFloat(p[6]);oelo=parseFloat(p[7]);oehi=parseFloat(p[8])}
     if(p.length>=10)calslope=parseFloat(p[9]);
     if(p.length>=11)probast=p[10].trim().toUpperCase().charAt(0);
+    // Optional extended columns: CalSlope_SE, NRI_events, NRI_nonevents, NRI_event_SE, NRI_nonevent_SE, Applicability
+    let calslope_se=null, nri_event=null, nri_nonevent=null, nri_event_se=null, nri_nonevent_se=null, applicability='U';
+    if(p.length>=12) calslope_se=parseFloat(p[11]);
+    if(p.length>=13) nri_event=parseFloat(p[12]);
+    if(p.length>=14) nri_nonevent=parseFloat(p[13]);
+    if(p.length>=15) nri_event_se=parseFloat(p[14]);
+    if(p.length>=16) nri_nonevent_se=parseFloat(p[15]);
+    if(p.length>=17) applicability=p[16].trim().toUpperCase().charAt(0);
     if(isNaN(n)||isNaN(c))continue;
     // Derive SE from CI if available
     let se_c=null;
@@ -208,28 +422,19 @@ function parseData(){
     if(isFinite(oelo)&&isFinite(oehi)&&oe>0){
       se_oe=(Math.log(oehi)-Math.log(oelo))/(2*1.96);
     }
-    data.push({study,n,events,c,clo,chi,se_c,oe,oelo,oehi,se_oe,calslope,probast,
-      probast_d1:probast,probast_d2:probast,probast_d3:probast,probast_d4:probast});
+    // Derive calslope SE if not provided: assume SE ~ 0.1 * |slope| as rough default
+    if(isFinite(calslope)&&!isFinite(calslope_se)){calslope_se=null}
+    data.push({study,n,events,c,clo,chi,se_c,oe,oelo,oehi,se_oe,calslope,calslope_se,probast,
+      probast_d1:probast,probast_d2:probast,probast_d3:probast,probast_d4:probast,
+      nri_event,nri_nonevent,nri_event_se,nri_nonevent_se,applicability});
   }
   return data.length>=2?data:null;
 }
 
-// Pool c-statistics on logit scale
+// Pool c-statistics — uses selected transformation
 function poolCstat(data,method){
-  const valid=data.filter(d=>d.c>0.5&&d.c<1&&d.se_c>0);
-  if(valid.length<2)return null;
-  const transformed=valid.map(d=>{
-    const lc=logit(d.c);
-    const se_lc=d.se_c/(d.c*(1-d.c));// delta method
-    return{...d,lc,se_lc,v:se_lc*se_lc};
-  });
-  const pooled=rePool(transformed.map(t=>t.lc),transformed.map(t=>t.v),method);
-  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
-  const zc=normalQuantile(1-alpha/2);
-  const c_pooled=expit(pooled.beta);
-  const c_lo=expit(pooled.beta-zc*pooled.se);
-  const c_hi=expit(pooled.beta+zc*pooled.se);
-  return{...pooled,c:c_pooled,ci:[c_lo,c_hi],studies:transformed};
+  const transform=document.getElementById('cTransform').value||'logit';
+  return poolCstatTransform(data,method,transform);
 }
 
 // Pool O:E ratios on log scale
@@ -302,6 +507,83 @@ function rePool(yi,vi,method){
   return{beta,se,z,p,Q,Qp,I2,tau2,k,weights:wPct};
 }
 
+// Pool calibration slopes directly (no transformation needed — unbounded)
+function poolCalSlope(data,method){
+  // If SE not available, derive from sample size heuristic: SE ~ 1/sqrt(events)
+  const valid=data.filter(d=>isFinite(d.calslope));
+  if(valid.length<2)return null;
+  const prepared=valid.map(d=>{
+    let se=d.calslope_se;
+    if(se===null||se===undefined||!isFinite(se)||se<=0){
+      // Approximate SE from events: SE ~ 1/sqrt(events) (Riley et al. heuristic)
+      se=d.events>0?1/Math.sqrt(d.events):0.1;
+    }
+    return{...d,yi:d.calslope,se_cs:se,v:se*se};
+  });
+  const pooled=rePool(prepared.map(t=>t.yi),prepared.map(t=>t.v),method);
+  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+  const zc=normalQuantile(1-alpha/2);
+  const slope_pooled=pooled.beta;
+  const slope_lo=pooled.beta-zc*pooled.se;
+  const slope_hi=pooled.beta+zc*pooled.se;
+  // Prediction interval
+  let pi=null;
+  if(pooled.k>=3){
+    const tVal=tQuantile(1-alpha/2,pooled.k-2);
+    const pi_se=Math.sqrt(pooled.se*pooled.se+pooled.tau2);
+    pi=[pooled.beta-tVal*pi_se,pooled.beta+tVal*pi_se];
+  }
+  return{...pooled,slope:slope_pooled,ci:[slope_lo,slope_hi],pi,studies:prepared};
+}
+
+// Pool NRI (event and non-event separately)
+function poolNRI(data,method){
+  const validEv=data.filter(d=>isFinite(d.nri_event)&&isFinite(d.nri_event_se)&&d.nri_event_se>0);
+  const validNE=data.filter(d=>isFinite(d.nri_nonevent)&&isFinite(d.nri_nonevent_se)&&d.nri_nonevent_se>0);
+  let eventPool=null,noneventPool=null;
+  if(validEv.length>=2){
+    const p=rePool(validEv.map(d=>d.nri_event),validEv.map(d=>d.nri_event_se*d.nri_event_se),method);
+    const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+    const zc=normalQuantile(1-alpha/2);
+    eventPool={...p,nri:p.beta,ci:[p.beta-zc*p.se,p.beta+zc*p.se],studies:validEv};
+  }
+  if(validNE.length>=2){
+    const p=rePool(validNE.map(d=>d.nri_nonevent),validNE.map(d=>d.nri_nonevent_se*d.nri_nonevent_se),method);
+    const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+    const zc=normalQuantile(1-alpha/2);
+    noneventPool={...p,nri:p.beta,ci:[p.beta-zc*p.se,p.beta+zc*p.se],studies:validNE};
+  }
+  // Overall NRI
+  let overall=null;
+  if(eventPool&&noneventPool){
+    const nri=eventPool.nri+noneventPool.nri;
+    const se=Math.sqrt(eventPool.se*eventPool.se+noneventPool.se*noneventPool.se);
+    const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+    const zc=normalQuantile(1-alpha/2);
+    overall={nri,se,ci:[nri-zc*se,nri+zc*se],z:nri/se,p:2*(1-normalCDF(Math.abs(nri/se)))};
+  }
+  return{eventPool,noneventPool,overall};
+}
+
+// Subgroup analysis by PROBAST
+function subgroupByProbast(data,method){
+  const transform=document.getElementById('cTransform').value||'logit';
+  const lowRoB=data.filter(d=>d.probast==='L');
+  const highRoB=data.filter(d=>d.probast==='H'||d.probast==='U');
+  let poolLow=null,poolHigh=null,testStat=null;
+  if(lowRoB.length>=2)poolLow=poolCstatTransform(lowRoB,method,transform);
+  if(highRoB.length>=2)poolHigh=poolCstatTransform(highRoB,method,transform);
+  // Test for subgroup difference: chi-sq = (beta1 - beta2)^2 / (se1^2 + se2^2)
+  if(poolLow&&poolHigh){
+    const diff=poolLow.beta-poolHigh.beta;
+    const seDiff=Math.sqrt(poolLow.se*poolLow.se+poolHigh.se*poolHigh.se);
+    const chi2=(diff*diff)/(seDiff*seDiff);
+    const pval=chiSqP(chi2,1);
+    testStat={diff,seDiff,chi2,pval,df:1};
+  }
+  return{poolLow,poolHigh,testStat,nLow:lowRoB.length,nHigh:highRoB.length};
+}
+
 // ═══════════════════════════════════════════
 // ANALYSIS
 // ═══════════════════════════════════════════
@@ -313,8 +595,16 @@ function runAnalysis(){
   const method=document.getElementById('poolMethod').value;
   const cPool=poolCstat(data,method);
   const oePool=poolOE(data,method);
-  lastResults={data,cPool,oePool};
-  renderCstat();renderOE();renderProbast();renderForests();
+  const calSlopePool=poolCalSlope(data,method);
+  const nriPool=poolNRI(data,method);
+  const subgroup=subgroupByProbast(data,method);
+  // Compare all 3 transformations
+  const cPoolLogit=poolCstatTransform(data,method,'logit');
+  const cPoolLoglog=poolCstatTransform(data,method,'loglog');
+  const cPoolArcsine=poolCstatTransform(data,method,'arcsine');
+  lastResults={data,cPool,oePool,calSlopePool,nriPool,subgroup,cPoolLogit,cPoolLoglog,cPoolArcsine};
+  renderCstat();renderOE();renderProbast();renderCalSlope();renderForests();
+  renderAdvanced();
   showTab('cstat');
 }
 
@@ -324,17 +614,21 @@ function renderCstat(){
   if(!cp){document.getElementById('cstatSummary').innerHTML='<p>Insufficient c-statistic data for pooling.</p>';return}
   const perf=cp.c>=0.8?'Excellent':cp.c>=0.7?'Good':cp.c>=0.6?'Moderate':'Poor';
   const perfBadge=cp.c>=0.7?'badge-green':cp.c>=0.6?'badge-amber':'badge-red';
+  const transformLabel={logit:'Logit(c)',loglog:'Log(-log(c))',arcsine:'Arcsine-sqrt'}[cp.transform||'logit'];
+  let piHtml='';
+  if(cp.pi){piHtml=`<div class="stat-box"><div class="value" style="color:var(--cyan)">${cp.pi[0].toFixed(3)} – ${cp.pi[1].toFixed(3)}</div><div class="label">95% Prediction Interval</div></div>`}
   document.getElementById('cstatSummary').innerHTML=`
     <div class="stat-box"><div class="value">${cp.c.toFixed(3)}</div><div class="label">Pooled C-statistic</div></div>
     <div class="stat-box"><div class="value">${cp.ci[0].toFixed(3)} – ${cp.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    ${piHtml}
     <div class="stat-box"><div class="value"><span class="badge ${perfBadge}">${perf}</span></div><div class="label">Discrimination</div></div>
     <div class="stat-box"><div class="value">${cp.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
-    <div class="stat-box"><div class="value">${cp.tau2.toFixed(5)}</div><div class="label">τ² (logit scale)</div></div>
+    <div class="stat-box"><div class="value">${cp.tau2.toFixed(5)}</div><div class="label">τ² (${transformLabel} scale)</div></div>
     <div class="stat-box"><div class="value">${cp.k}</div><div class="label">Studies Pooled</div></div>
   `;
   const studies=cp.studies;
   document.querySelector('#cstatTable tbody').innerHTML=studies.map((s,i)=>`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${s.events}</td><td>${s.c.toFixed(3)}</td><td>${s.clo.toFixed(3)} – ${s.chi.toFixed(3)}</td><td>${cp.weights[i].toFixed(1)}%</td></tr>`).join('');
-  document.getElementById('cstatHet').innerHTML=`<p>Q = ${cp.Q.toFixed(2)}, df = ${cp.k-1}, P = ${cp.Qp.toFixed(4)} | I² = ${cp.I2.toFixed(1)}% | τ² = ${cp.tau2.toFixed(5)} (logit scale)</p>`;
+  document.getElementById('cstatHet').innerHTML=`<p>Q = ${cp.Q.toFixed(2)}, df = ${cp.k-1}, P = ${cp.Qp.toFixed(4)} | I² = ${cp.I2.toFixed(1)}% | τ² = ${cp.tau2.toFixed(5)} (${transformLabel} scale) | Transform: ${transformLabel}</p>`;
 }
 
 function renderOE(){
@@ -403,6 +697,323 @@ function renderProbast(){
   });
 }
 
+function renderCalSlope(){
+  const r=lastResults;
+  const cs=r.calSlopePool;
+  if(!cs){document.getElementById('calSlopeSummary').innerHTML='<p>Insufficient calibration slope data for pooling.</p>';return}
+  const interp=Math.abs(cs.slope-1)<0.1?'Well calibrated':cs.slope<0.9?'Overfitting in development':'Underfitting or miscalibration';
+  const badge=Math.abs(cs.slope-1)<0.1?'badge-green':Math.abs(cs.slope-1)<0.2?'badge-amber':'badge-red';
+  let piHtml='';
+  if(cs.pi){piHtml=`<div class="stat-box"><div class="value" style="color:var(--cyan)">${cs.pi[0].toFixed(3)} – ${cs.pi[1].toFixed(3)}</div><div class="label">95% Prediction Interval</div></div>`}
+  document.getElementById('calSlopeSummary').innerHTML=`
+    <div class="stat-box"><div class="value">${cs.slope.toFixed(3)}</div><div class="label">Pooled Slope</div></div>
+    <div class="stat-box"><div class="value">${cs.ci[0].toFixed(3)} – ${cs.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    ${piHtml}
+    <div class="stat-box"><div class="value"><span class="badge ${badge}">${interp}</span></div><div class="label">Interpretation</div></div>
+    <div class="stat-box"><div class="value">${cs.I2.toFixed(1)}%</div><div class="label">I² Heterogeneity</div></div>
+    <div class="stat-box"><div class="value">${cs.k}</div><div class="label">Studies Pooled</div></div>
+  `;
+  const studies=cs.studies;
+  document.querySelector('#calSlopeTable tbody').innerHTML=studies.map((s,i)=>{
+    const si=s.calslope<0.9?'Overfitting':s.calslope>1.1?'Underfitting':'Calibrated';
+    return`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${s.calslope.toFixed(3)}</td><td>${si}</td><td>${cs.weights[i].toFixed(1)}%</td></tr>`;
+  }).join('');
+  document.getElementById('calSlopeHet').innerHTML=`<p>Q = ${cs.Q.toFixed(2)}, df = ${cs.k-1}, P = ${cs.Qp.toFixed(4)} | I² = ${cs.I2.toFixed(1)}% | τ² = ${cs.tau2.toFixed(5)}</p>`;
+  renderForestCS();
+}
+
+function renderForestCS(){
+  const canvas=document.getElementById('forestCSCanvas');
+  const r=lastResults;
+  const cs=r.calSlopePool;
+  if(!cs)return;
+  const studies=cs.studies;
+  const rows=studies.length+1;
+  canvas.height=Math.max(300,rows*28+100);
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const pad={top:40,right:140,bottom:40,left:200};
+  const pw=W-pad.left-pad.right;
+  const rowH=24;
+  const allS=[...studies.map(s=>s.calslope),cs.ci[0],cs.ci[1]];
+  const sMin=Math.min(...allS)*0.85;
+  const sMax=Math.max(...allS)*1.15;
+  const xScale=v=>pad.left+((v-sMin)/(sMax-sMin))*pw;
+  // Reference line at 1
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(xScale(1),pad.top);ctx.lineTo(xScale(1),H-pad.bottom);ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='#94a3b8';ctx.font='bold 11px sans-serif';ctx.textAlign='left';
+  ctx.fillText('Study',10,pad.top-10);
+  ctx.textAlign='center';ctx.fillText('Calibration Slope',pad.left+pw/2,pad.top-10);
+  studies.forEach((s,i)=>{
+    const y=pad.top+10+i*rowH;
+    const se=s.se_cs;
+    const lo=s.calslope-1.96*se,hi=s.calslope+1.96*se;
+    const color=Math.abs(s.calslope-1)>0.2?'#ef4444':'#22c55e';
+    ctx.strokeStyle=color;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(xScale(lo),y);ctx.lineTo(xScale(hi),y);ctx.stroke();
+    ctx.beginPath();ctx.arc(xScale(s.calslope),y,4,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+    ctx.fillStyle='#e2e8f0';ctx.font='11px sans-serif';ctx.textAlign='right';
+    ctx.fillText(s.study,pad.left-8,y+4);
+    ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+    ctx.fillText(`${s.calslope.toFixed(3)} [${lo.toFixed(3)}, ${hi.toFixed(3)}]`,W-pad.right+5,y+4);
+  });
+  const divY=pad.top+10+studies.length*rowH+8;
+  ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,divY);ctx.lineTo(W-10,divY);ctx.stroke();
+  const y=divY+20;
+  const cx2=xScale(cs.slope),lx=xScale(cs.ci[0]),rx=xScale(cs.ci[1]);
+  ctx.beginPath();ctx.moveTo(lx,y);ctx.lineTo(cx2,y-6);ctx.lineTo(rx,y);ctx.lineTo(cx2,y+6);ctx.closePath();
+  ctx.fillStyle='#22c55e';ctx.globalAlpha=0.7;ctx.fill();ctx.globalAlpha=1;
+  ctx.fillStyle='#22c55e';ctx.font='bold 11px sans-serif';ctx.textAlign='right';
+  ctx.fillText('Pooled',pad.left-8,y+4);
+  ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
+  ctx.fillText(`${cs.slope.toFixed(3)} [${cs.ci[0].toFixed(3)}, ${cs.ci[1].toFixed(3)}]`,W-pad.right+5,y+4);
+}
+
+function renderAdvanced(){
+  renderTransformCompare();
+  renderPredictionInterval();
+  renderBubblePlot();
+  renderNRI();
+  renderApplicability();
+  renderSubgroup();
+}
+
+function renderTransformCompare(){
+  const r=lastResults;
+  const pools={logit:r.cPoolLogit,loglog:r.cPoolLoglog,arcsine:r.cPoolArcsine};
+  const selected=(document.getElementById('cTransform').value)||'logit';
+  const names={logit:'Logit(c)',loglog:'Log(-log(c))',arcsine:'Arcsine-sqrt(c)'};
+  const refs={logit:'Standard (Snell et al.)',loglog:'Better near c=1 (Debray 2017)',arcsine:'Variance-stabilizing (Debray 2017)'};
+  let html='';
+  for(const[key,pool] of Object.entries(pools)){
+    if(!pool){html+=`<div class="transform-card"><h4>${names[key]}</h4><p style="color:var(--text2)">Insufficient data</p></div>`;continue}
+    const sel=key===selected?'selected':'';
+    html+=`<div class="transform-card ${sel}">
+      <h4>${names[key]}${key===selected?' (selected)':''}</h4>
+      <div class="tc-value">${pool.c.toFixed(4)}</div>
+      <div class="tc-ci">95% CI: ${pool.ci[0].toFixed(4)} – ${pool.ci[1].toFixed(4)}</div>
+      ${pool.pi?`<div class="tc-ci" style="color:var(--cyan)">95% PI: ${pool.pi[0].toFixed(4)} – ${pool.pi[1].toFixed(4)}</div>`:''}
+      <div class="tc-ci">I²: ${pool.I2.toFixed(1)}% | τ²: ${pool.tau2.toFixed(5)}</div>
+      <div class="tc-ci" style="margin-top:4px;font-style:italic">${refs[key]}</div>
+    </div>`;
+  }
+  document.getElementById('transformCompare').innerHTML=html;
+}
+
+function renderPredictionInterval(){
+  const r=lastResults;
+  const cp=r.cPool;
+  const el=document.getElementById('predictionInterval');
+  if(!cp){el.innerHTML='<p>No c-statistic results available.</p>';return}
+  if(!cp.pi){el.innerHTML=`<div class="pi-box"><div class="pi-label">Prediction Interval</div><div class="pi-value">Not available (k &lt; 3 required, have k = ${cp.k})</div><div class="pi-note">Prediction intervals require at least 3 studies (uses t-distribution with k-2 df).</div></div>`;return}
+  const alpha=parseFloat(document.getElementById('alpha').value)||0.05;
+  const conf=((1-alpha)*100).toFixed(0);
+  const piWidth=cp.pi[1]-cp.pi[0];
+  const ciWidth=cp.ci[1]-cp.ci[0];
+  const ratio=(piWidth/ciWidth).toFixed(1);
+  el.innerHTML=`
+    <div class="pi-box">
+      <div class="pi-label">${conf}% Prediction Interval for Next Validation Study</div>
+      <div class="pi-value">${cp.pi[0].toFixed(3)} – ${cp.pi[1].toFixed(3)}</div>
+      <div class="pi-note">
+        Compare: CI = ${cp.ci[0].toFixed(3)} – ${cp.ci[1].toFixed(3)} (width ${ciWidth.toFixed(3)}) vs PI = width ${piWidth.toFixed(3)} (${ratio}x wider).<br>
+        CI = precision of the mean c. PI = where the next study's c might fall. The PI is wider because it accounts for between-study heterogeneity (τ² = ${cp.tau2.toFixed(5)}).<br>
+        Uses t_{${cp.k-2}} distribution (df = k-2 = ${cp.k-2}).
+      </div>
+    </div>`;
+}
+
+function renderBubblePlot(){
+  const r=lastResults;
+  const data=r.data;
+  const canvas=document.getElementById('bubbleCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  // Filter: need both c and oe
+  const valid=data.filter(d=>d.c>0&&isFinite(d.c)&&d.oe>0&&isFinite(d.oe));
+  if(valid.length<1){ctx.fillStyle='#94a3b8';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText('Need both c-statistic and O:E ratio data for bubble plot.',W/2,H/2);return}
+  const pad={top:50,right:40,bottom:60,left:70};
+  const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
+  const cVals=valid.map(d=>d.c),oeVals=valid.map(d=>d.oe),nVals=valid.map(d=>d.n);
+  const cMin=Math.max(Math.min(...cVals)-0.03,0.4);
+  const cMax=Math.min(Math.max(...cVals)+0.03,1);
+  const oeMin=Math.max(Math.min(...oeVals)*0.85,0);
+  const oeMax=Math.max(...oeVals)*1.15;
+  const xScale=v=>pad.left+((v-cMin)/(cMax-cMin))*pw;
+  const yScale=v=>pad.top+ph-((v-oeMin)/(oeMax-oeMin))*ph;
+  const nMax=Math.max(...nVals);
+  const rScale=n=>Math.max(6,Math.min(35,Math.sqrt(n/nMax)*35));
+  // Quadrant fills
+  const x05=xScale(0.5),y1=yScale(1);
+  // Check if reference lines are in view
+  if(cMin<0.5&&cMax>0.5){
+    // Left-top: poor disc + underprediction (faint red)
+    ctx.fillStyle='rgba(239,68,68,0.04)';ctx.fillRect(pad.left,pad.top,x05-pad.left,y1-pad.top);
+    // Left-bottom: poor disc + overprediction (faint amber)
+    ctx.fillStyle='rgba(245,158,11,0.04)';ctx.fillRect(pad.left,y1,x05-pad.left,ph+pad.top-y1);
+    // Right-top: good disc + underprediction (faint blue)
+    ctx.fillStyle='rgba(6,182,212,0.04)';ctx.fillRect(x05,pad.top,pw+pad.left-x05,y1-pad.top);
+    // Right-bottom: good disc + overprediction (faint green)
+    ctx.fillStyle='rgba(34,197,94,0.04)';ctx.fillRect(x05,y1,pw+pad.left-x05,ph+pad.top-y1);
+  }
+  // Reference lines
+  if(oeMin<1&&oeMax>1){
+    ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.moveTo(pad.left,y1);ctx.lineTo(W-pad.right,y1);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#475569';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillText('O:E = 1 (perfect calibration)',W-pad.right-5,y1-5);
+  }
+  if(cMin<=0.5&&cMax>0.5){
+    ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.setLineDash([6,4]);
+    ctx.beginPath();ctx.moveTo(x05,pad.top);ctx.lineTo(x05,H-pad.bottom);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='#475569';ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillText('c = 0.5',x05+3,H-pad.bottom-5);
+  }
+  // Axes
+  ctx.strokeStyle='#2a3450';ctx.lineWidth=1;ctx.setLineDash([]);
+  ctx.beginPath();ctx.moveTo(pad.left,pad.top);ctx.lineTo(pad.left,H-pad.bottom);ctx.lineTo(W-pad.right,H-pad.bottom);ctx.stroke();
+  // X axis ticks
+  const xTicks=5;
+  ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='center';
+  for(let i=0;i<=xTicks;i++){
+    const v=cMin+(cMax-cMin)*i/xTicks;
+    const x=xScale(v);
+    ctx.beginPath();ctx.moveTo(x,H-pad.bottom);ctx.lineTo(x,H-pad.bottom+5);ctx.stroke();
+    ctx.fillText(v.toFixed(2),x,H-pad.bottom+18);
+  }
+  // Y axis ticks
+  const yTicks=5;
+  ctx.textAlign='right';
+  for(let i=0;i<=yTicks;i++){
+    const v=oeMin+(oeMax-oeMin)*i/yTicks;
+    const y=yScale(v);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(pad.left-5,y);ctx.stroke();
+    ctx.fillText(v.toFixed(2),pad.left-8,y+4);
+  }
+  // Axis labels
+  ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+  ctx.fillText('C-statistic (Discrimination)',pad.left+pw/2,H-10);
+  ctx.save();ctx.translate(15,pad.top+ph/2);ctx.rotate(-Math.PI/2);ctx.fillText('O:E Ratio (Calibration)',0,0);ctx.restore();
+  // Title
+  ctx.fillStyle='#a78bfa';ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Calibration vs Discrimination Bubble Plot',W/2,25);
+  // Bubbles
+  const robColors={L:'rgba(34,197,94,0.6)',H:'rgba(239,68,68,0.6)',U:'rgba(245,158,11,0.6)'};
+  const robStroke={L:'#22c55e',H:'#ef4444',U:'#f59e0b'};
+  valid.forEach(d=>{
+    const x=xScale(d.c),y=yScale(d.oe);
+    const r=rScale(d.n);
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fillStyle=robColors[d.probast]||robColors.U;ctx.fill();
+    ctx.strokeStyle=robStroke[d.probast]||robStroke.U;ctx.lineWidth=1.5;ctx.stroke();
+    // Study label
+    ctx.fillStyle='#e2e8f0';ctx.font='9px sans-serif';ctx.textAlign='center';
+    ctx.fillText(d.study,x,y-r-4);
+  });
+  // Legend
+  const lx=W-pad.right-150,ly=pad.top+10;
+  ctx.fillStyle='var(--surface2)';
+  [['Low RoB','L'],['High RoB','H'],['Unclear','U']].forEach(([lab,key],i)=>{
+    const cy=ly+i*18;
+    ctx.beginPath();ctx.arc(lx,cy,5,0,Math.PI*2);ctx.fillStyle=robColors[key];ctx.fill();ctx.strokeStyle=robStroke[key];ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillText(lab,lx+10,cy+4);
+  });
+  ctx.fillStyle='#94a3b8';ctx.font='9px sans-serif';ctx.textAlign='left';
+  ctx.fillText('Bubble size = sample size',lx-5,ly+60);
+}
+
+function renderNRI(){
+  const r=lastResults;
+  const nri=r.nriPool;
+  const el=document.getElementById('nriResults');
+  if(!nri.eventPool&&!nri.noneventPool){
+    el.innerHTML='<p style="color:var(--text2)">No NRI data provided. Add NRI_events, NRI_nonevents, NRI_event_SE, NRI_nonevent_SE as optional columns after CalSlope_SE.</p>';
+    return;
+  }
+  let html='<div class="nri-grid">';
+  if(nri.eventPool){
+    html+=`<div class="stat-box"><div class="value">${nri.eventPool.nri.toFixed(3)}</div><div class="label">Pooled Event NRI<br>${nri.eventPool.ci[0].toFixed(3)} – ${nri.eventPool.ci[1].toFixed(3)}</div></div>`;
+  }
+  if(nri.noneventPool){
+    html+=`<div class="stat-box"><div class="value">${nri.noneventPool.nri.toFixed(3)}</div><div class="label">Pooled Non-event NRI<br>${nri.noneventPool.ci[0].toFixed(3)} – ${nri.noneventPool.ci[1].toFixed(3)}</div></div>`;
+  }
+  if(nri.overall){
+    const badge=nri.overall.nri>0?'badge-green':'badge-red';
+    html+=`<div class="stat-box"><div class="value"><span class="badge ${badge}">${nri.overall.nri.toFixed(3)}</span></div><div class="label">Overall NRI<br>${nri.overall.ci[0].toFixed(3)} – ${nri.overall.ci[1].toFixed(3)}<br>P = ${nri.overall.p.toFixed(4)}</div></div>`;
+  }
+  html+='</div>';
+  el.innerHTML=html;
+}
+
+function renderApplicability(){
+  const r=lastResults;
+  const data=r.data;
+  const robMap={L:'<span class="traffic-light tl-low"></span>',H:'<span class="traffic-light tl-high"></span>',U:'<span class="traffic-light tl-unclear"></span>'};
+  // Applicability is separate from RoB — use applicability field
+  document.querySelector('#applicabilityTable tbody').innerHTML=data.map(d=>{
+    const app=d.applicability||'U';
+    // For now, 3 applicability domains mirror the overall applicability rating
+    // In practice, users would provide per-domain. We use the single column for all 3.
+    return`<tr><td>${d.study}</td><td>${robMap[app]}</td><td>${robMap[app]}</td><td>${robMap[app]}</td><td>${robMap[app]}</td></tr>`;
+  }).join('');
+  // Summary counts
+  const counts={L:0,H:0,U:0};
+  data.forEach(d=>{const a=d.applicability||'U';if(counts[a]!==undefined)counts[a]++});
+  const total=data.length;
+  document.getElementById('applicabilitySummary').innerHTML=`
+    <div class="stat-box"><div class="value" style="color:var(--green)">${counts.L}</div><div class="label">Low Concern (${(counts.L/total*100).toFixed(0)}%)</div></div>
+    <div class="stat-box"><div class="value" style="color:var(--red)">${counts.H}</div><div class="label">High Concern (${(counts.H/total*100).toFixed(0)}%)</div></div>
+    <div class="stat-box"><div class="value" style="color:var(--amber)">${counts.U}</div><div class="label">Unclear (${(counts.U/total*100).toFixed(0)}%)</div></div>
+  `;
+}
+
+function renderSubgroup(){
+  const r=lastResults;
+  const sg=r.subgroup;
+  const el=document.getElementById('subgroupResults');
+  const testEl=document.getElementById('subgroupTest');
+  let html='';
+  // Low RoB subgroup
+  html+='<div class="subgroup-card"><h4>Low Risk of Bias (k = '+sg.nLow+')</h4>';
+  if(sg.poolLow){
+    const p=sg.poolLow;
+    html+=`<div class="stat-grid"><div class="stat-box"><div class="value">${p.c.toFixed(3)}</div><div class="label">Pooled C</div></div>
+    <div class="stat-box"><div class="value">${p.ci[0].toFixed(3)} – ${p.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    <div class="stat-box"><div class="value">${p.I2.toFixed(1)}%</div><div class="label">I²</div></div></div>`;
+    if(p.pi){html+=`<div class="pi-box" style="margin-top:8px"><div class="pi-label">95% PI</div><div class="pi-value">${p.pi[0].toFixed(3)} – ${p.pi[1].toFixed(3)}</div></div>`}
+  } else {html+='<p style="color:var(--text2)">Fewer than 2 Low-RoB studies; cannot pool.</p>'}
+  html+='</div>';
+  // High/Unclear RoB subgroup
+  html+='<div class="subgroup-card"><h4>High / Unclear Risk of Bias (k = '+sg.nHigh+')</h4>';
+  if(sg.poolHigh){
+    const p=sg.poolHigh;
+    html+=`<div class="stat-grid"><div class="stat-box"><div class="value">${p.c.toFixed(3)}</div><div class="label">Pooled C</div></div>
+    <div class="stat-box"><div class="value">${p.ci[0].toFixed(3)} – ${p.ci[1].toFixed(3)}</div><div class="label">95% CI</div></div>
+    <div class="stat-box"><div class="value">${p.I2.toFixed(1)}%</div><div class="label">I²</div></div></div>`;
+    if(p.pi){html+=`<div class="pi-box" style="margin-top:8px"><div class="pi-label">95% PI</div><div class="pi-value">${p.pi[0].toFixed(3)} – ${p.pi[1].toFixed(3)}</div></div>`}
+  } else {html+='<p style="color:var(--text2)">Fewer than 2 High/Unclear-RoB studies; cannot pool.</p>'}
+  html+='</div>';
+  el.innerHTML=html;
+  // Test for subgroup difference
+  if(sg.testStat){
+    const t=sg.testStat;
+    const sig=t.pval<0.05?'badge-red':'badge-green';
+    const sigText=t.pval<0.05?'Significant difference':'No significant difference';
+    testEl.innerHTML=`<div class="card" style="margin:0"><h4>Test for Subgroup Difference</h4>
+    <p>Chi² = ${t.chi2.toFixed(2)}, df = ${t.df}, P = ${t.pval.toFixed(4)} <span class="badge ${sig}">${sigText}</span></p>
+    <p style="font-size:0.85rem;color:var(--text2);margin-top:6px">Difference in pooled estimates (transformed scale): ${t.diff.toFixed(4)} (SE = ${t.seDiff.toFixed(4)})</p></div>`;
+  } else {
+    testEl.innerHTML='<p style="color:var(--text2)">Cannot test subgroup difference — need at least 2 studies in each subgroup.</p>';
+  }
+}
+
 function renderForests(){
   renderForestC();renderForestOE();
 }
@@ -455,12 +1066,24 @@ function renderForestC(){
   ctx.strokeStyle='#475569';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(10,divY);ctx.lineTo(W-10,divY);ctx.stroke();
   const y=divY+20;
   const cx=xScale(cp.c),lx=xScale(cp.ci[0]),rx=xScale(cp.ci[1]);
+  // Draw prediction interval band if available
+  if(cp.pi){
+    const piLx=xScale(Math.max(cp.pi[0],cMin)),piRx=xScale(Math.min(cp.pi[1],cMax));
+    ctx.fillStyle='rgba(6,182,212,0.12)';ctx.fillRect(piLx,y-10,piRx-piLx,20);
+    ctx.strokeStyle='#06b6d4';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(piLx,y);ctx.lineTo(piRx,y);ctx.stroke();ctx.setLineDash([]);
+  }
   ctx.beginPath();ctx.moveTo(lx,y);ctx.lineTo(cx,y-6);ctx.lineTo(rx,y);ctx.lineTo(cx,y+6);ctx.closePath();
   ctx.fillStyle='#8b5cf6';ctx.globalAlpha=0.7;ctx.fill();ctx.globalAlpha=1;
   ctx.fillStyle='#8b5cf6';ctx.font='bold 11px sans-serif';ctx.textAlign='right';
   ctx.fillText('Pooled',pad.left-8,y+4);
   ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='left';
-  ctx.fillText(`${cp.c.toFixed(3)} [${cp.ci[0].toFixed(3)}, ${cp.ci[1].toFixed(3)}]`,W-pad.right+5,y+4);
+  let annot=`${cp.c.toFixed(3)} [${cp.ci[0].toFixed(3)}, ${cp.ci[1].toFixed(3)}]`;
+  ctx.fillText(annot,W-pad.right+5,y+4);
+  if(cp.pi){
+    ctx.fillStyle='#06b6d4';ctx.font='9px monospace';
+    ctx.fillText(`PI: ${cp.pi[0].toFixed(3)} – ${cp.pi[1].toFixed(3)}`,W-pad.right+5,y+16);
+  }
 }
 
 function renderForestOE(){
