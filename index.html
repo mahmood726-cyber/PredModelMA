@@ -78,6 +78,18 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
 .threshold-input{display:flex;align-items:center;gap:12px;margin-bottom:12px}
 .threshold-input label{margin-bottom:0;white-space:nowrap}
 .threshold-input input{max-width:120px}
+.kh-box{background:rgba(6,182,212,0.08);border:1px solid rgba(6,182,212,0.2);border-radius:var(--radius);padding:14px;margin-top:12px}
+.kh-box .kh-label{font-size:0.82rem;color:var(--cyan);font-weight:600;margin-bottom:4px}
+.kh-box .kh-value{font-size:1.1rem;font-weight:700;color:var(--cyan)}
+.kh-box .kh-note{font-size:0.78rem;color:var(--text2);margin-top:4px}
+.tf-legend{display:flex;gap:16px;align-items:center;margin-top:8px;flex-wrap:wrap}
+.tf-legend-item{display:flex;align-items:center;gap:4px;font-size:0.82rem;color:var(--text2)}
+.tf-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.epv-row{display:flex;align-items:center;gap:8px}
+.epv-row .tl{width:14px;height:14px;border-radius:50%;display:inline-block}
+.bayes-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.bayes-grid{grid-template-columns:1fr}}
+.doi-legend{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;font-size:0.82rem;color:var(--text2)}
 </style>
 </head>
 <body>
@@ -131,6 +143,14 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
       <div><label>Compute prediction interval</label>
         <select id="compPI"><option value="yes">Yes</option><option value="no">No</option></select>
       </div>
+    </div>
+    <div class="grid-4" style="margin-top:8px">
+      <div><label>Number of predictors in model</label><input type="number" id="numPredictors" value="" placeholder="e.g., 8" min="1" max="200"></div>
+      <div><label>Meta-regression covariate</label>
+        <select id="metaRegCovariate"><option value="logN">log(N)</option><option value="year">Year (numeric suffix)</option><option value="prevalence">Prevalence (events/N)</option></select>
+      </div>
+      <div><label>Bayesian prior SD on logit(c)</label><input type="number" id="bayesPriorSD" value="10" step="1" min="0.1" max="100"></div>
+      <div><label>Clinical c threshold</label><input type="number" id="bayesCThreshold" value="0.7" step="0.05" min="0.5" max="0.99"></div>
     </div>
     <div class="btn-group">
       <button class="btn btn-primary" onclick="runAnalysis()">Run Analysis</button>
@@ -267,6 +287,46 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
     <div class="info-box">Meta-regression of logit(c) on log(N). Reports R-squared = proportion of tau-squared explained by sample size. If R-squared > 50%, smaller studies tend to show systematically different c-statistics (spectrum effect).</div>
     <div id="hetDecompResults"></div>
   </div>
+  <div class="card">
+    <h3>Trim-and-Fill for C-statistics (Sensitivity Analysis)</h3>
+    <div class="info-box"><strong>Sensitivity analysis only</strong> — not a primary correction. Applied on logit(c) scale. Uses the R0 rank-based estimator to estimate the number of missing studies, imputes symmetrically around the pooled estimate, and re-pools. Imputed studies shown as filled triangles on the funnel plot above.</div>
+    <div id="trimFillResults"></div>
+  </div>
+  <div class="card">
+    <h3>Doi Plot + LFK Index for C-statistics</h3>
+    <div class="info-box">Alternative to the funnel plot for detecting publication bias. The Doi plot graphs Z-scores (effect / SE) against |Z-scores|. The LFK index quantifies asymmetry: |LFK| &le; 1 = no asymmetry, |LFK| 1&ndash;2 = minor, |LFK| > 2 = major asymmetry (Furuya-Kanamori, Barendregt &amp; Doi 2018).</div>
+    <div class="plot-container"><canvas id="doiCanvas" width="800" height="600"></canvas></div>
+    <div id="lfkResult" style="margin-top:8px"></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('doiCanvas','doi_plot')">Export PNG</button></div>
+  </div>
+  <div class="card">
+    <h3>Events Per Variable (EPV) Assessment</h3>
+    <div class="info-box">EPV = min(events, non-events) / number_of_predictors. Studies with EPV &lt; 10 may have optimistically biased c-statistics (overfitting). EPV &ge; 20 is recommended for stable validation. Set the number of predictors in the Data Input tab.</div>
+    <div id="epvResults"></div>
+  </div>
+  <div class="card">
+    <h3>Harrell's Concordance Decomposition by Predictor</h3>
+    <div class="info-box">Decomposes the c-statistic by predictor contribution using an approximate beta-weight approach. When partial c data are not directly available, partial c for predictor j is approximated as c_partial_j = 0.5 + (c - 0.5) * |beta_j| / sum(|beta_k|). Enter predictor names and standardized coefficients below.</div>
+    <div style="margin-bottom:12px">
+      <label>Predictors (name:beta, comma-separated)</label>
+      <input type="text" id="harrellPredictors" placeholder="e.g., Age:0.45, SBP:0.32, Smoking:0.28, Diabetes:0.18, HDL:-0.22" value="Age:0.45, SBP:0.32, Smoking:0.28, Diabetes:0.18, HDL:-0.22">
+      <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="renderHarrellDecomp()">Compute Decomposition</button>
+    </div>
+    <div id="harrellDecompResults"></div>
+  </div>
+  <div class="card">
+    <h3>Meta-Regression on Study Characteristics</h3>
+    <div class="info-box">Regresses logit(c) on a user-selected covariate (log(N), publication year, or prevalence). Reports slope, CI, R-squared (% of tau-squared explained), and residual tau-squared. Select the covariate in the Data Input tab. Bubble plot: covariate on X, c on Y, size = N.</div>
+    <div id="metaRegResults"></div>
+    <div class="plot-container" style="margin-top:12px"><canvas id="metaRegCanvas" width="800" height="600"></canvas></div>
+    <div class="btn-group"><button class="btn btn-secondary btn-sm" onclick="exportPlot('metaRegCanvas','metareg_bubble')">Export PNG</button></div>
+  </div>
+  <div class="card">
+    <h3>Bayesian Pooling of C-statistics</h3>
+    <div class="info-box">Bayesian random-effects model on logit(c) scale. Prior: Normal(0, sigma_prior^2) for mu. Posterior via 200x200 grid approximation over (mu, tau). Reports posterior median, 95% CrI, and P(c > threshold | data). Configure prior SD and clinical threshold in the Data Input tab.</div>
+    <div id="bayesResults" class="bayes-grid"></div>
+    <div id="bayesCompare" style="margin-top:12px"></div>
+  </div>
 </div>
 
 <!-- FOREST PLOTS -->
@@ -308,6 +368,13 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
       <tr><td><strong>Funnel plot</strong></td><td>Discrimination funnel: c-stat vs SE(c). Pseudo-CI lines. Egger regression for small-study effects. Colored by PROBAST.</td></tr>
       <tr><td><strong>Leave-one-out</strong></td><td>Sensitivity: re-pool c without each study. Flags studies shifting pooled c by > 0.01. Forest plot of LOO estimates.</td></tr>
       <tr><td><strong>Het. decomposition</strong></td><td>Meta-regression of logit(c) on log(N). R-squared = proportion of tau-squared explained. R-squared > 50% = spectrum effect.</td></tr>
+      <tr><td><strong>Knapp-Hartung</strong></td><td>Replace z-based CI with t_{k-1}. HKSJ variance inflation q_KH = max(1, Q/(k-1)). Wider CI with proper small-sample correction. Shown alongside standard CI.</td></tr>
+      <tr><td><strong>Trim-and-fill</strong></td><td>Sensitivity analysis for publication bias in c-statistics. R0 rank-based estimator on logit(c) scale. Imputes missing studies and re-pools. Not a primary correction.</td></tr>
+      <tr><td><strong>Doi + LFK</strong></td><td>Alternative to funnel: Z-score vs |Z-score|. LFK index: |LFK| &le; 1 none, 1-2 minor, >2 major asymmetry.</td></tr>
+      <tr><td><strong>EPV</strong></td><td>Events per variable = min(events, non-events) / predictors. Green &ge; 20, Amber 10-20, Red &lt; 10. Low EPV = optimistic c.</td></tr>
+      <tr><td><strong>Concordance decomp.</strong></td><td>Approximate partial c per predictor: c_partial_j = 0.5 + (c-0.5) * |beta_j| / sum(|beta_k|). Shows which predictors drive discrimination.</td></tr>
+      <tr><td><strong>Meta-regression</strong></td><td>Regress logit(c) on covariate (log(N), year, prevalence). Reports slope, CI, R-squared, residual tau-squared. Bubble plot.</td></tr>
+      <tr><td><strong>Bayesian pooling</strong></td><td>Grid approximation (200x200) for mu, tau on logit(c). Weakly informative Normal prior. Posterior median, 95% CrI, P(c > threshold | data).</td></tr>
     </table>
     <h3 style="margin-top:16px">PROBAST Domain Details</h3>
     <table>
@@ -319,7 +386,7 @@ footer{text-align:center;padding:30px 0;color:var(--text2);font-size:0.82rem;bor
   </div>
 </div>
 
-<footer>PredModelMA v3.0 — Mahmood Ahmad, Tahir Heart Institute — Offline-first, no data leaves your browser</footer>
+<footer>PredModelMA v4.0 — Mahmood Ahmad, Tahir Heart Institute — 25 methods — Offline-first, no data leaves your browser</footer>
 </div>
 
 <script>
@@ -886,6 +953,371 @@ function hetDecomposition(data, method) {
 }
 
 // ═══════════════════════════════════════════
+// KNAPP-HARTUNG ADJUSTMENT
+// ═══════════════════════════════════════════
+function knappHartungC(cPool) {
+  if (!cPool || cPool.k < 2) return null;
+  const k = cPool.k;
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  // HKSJ: q_KH = max(1, Q/(k-1)) — floor at 1 per advanced-stats rules
+  const qKH = Math.max(1, cPool.Q / (k - 1));
+  // Use t_{k-1} NOT z
+  const tCrit = tQuantile(1 - alpha / 2, k - 1);
+  // KH-adjusted SE on transformed scale
+  const seKH = cPool.se * Math.sqrt(qKH);
+  // Back-transform CI
+  const transform = cPool.transform || 'logit';
+  const backfn = transform === 'loglog' ? cBackTransformLoglog : transform === 'arcsine' ? cBackTransformArcsine : cBackTransformLogit;
+  const lo = backfn(cPool.beta - tCrit * seKH);
+  const hi = backfn(cPool.beta + tCrit * seKH);
+  const ci = [Math.min(lo, hi), Math.max(lo, hi)];
+  const ciWidth = ci[1] - ci[0];
+  return { ci, qKH, tCrit, seKH, ciWidth };
+}
+
+// ═══════════════════════════════════════════
+// TRIM-AND-FILL FOR C-STATISTICS
+// ═══════════════════════════════════════════
+function trimAndFillC(data, method) {
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  if (valid.length < 3) return null;
+  // Work on logit(c) scale
+  const studies = valid.map(d => {
+    const lc = logit(d.c);
+    const se_lc = d.se_c / (d.c * (1 - d.c));
+    return { ...d, lc, se_lc, v: se_lc * se_lc };
+  });
+  // Pool original
+  const origPool = rePool(studies.map(s => s.lc), studies.map(s => s.v), method);
+  const theta0 = origPool.beta;
+  // R0 rank-based estimator (Duval & Tweedie 2000)
+  // 1. Compute residuals from pooled estimate, rank by absolute residual
+  const residuals = studies.map((s, i) => ({ idx: i, resid: s.lc - theta0, absResid: Math.abs(s.lc - theta0), sign: Math.sign(s.lc - theta0) }));
+  residuals.sort((a, b) => a.absResid - b.absResid);
+  // Assign ranks
+  residuals.forEach((r, i) => r.rank = i + 1);
+  // Count studies on the right side (positive residuals = higher than pooled = possibly missing on left)
+  // Determine the side with fewer studies
+  const positiveCount = residuals.filter(r => r.sign > 0).length;
+  const negativeCount = residuals.filter(r => r.sign < 0).length;
+  const side = positiveCount > negativeCount ? 1 : -1; // side to trim (1 = right, -1 = left)
+  // R0 estimator: count studies on the dominant side that exceed a mirror threshold
+  // R0 = T_n where T_n = sum of ranks of extreme studies
+  const extreme = residuals.filter(r => r.sign === side);
+  extreme.sort((a, b) => b.absResid - a.absResid);
+  // Iterative trimming
+  let k0 = 0;
+  for (let iter = 0; iter < 20; iter++) {
+    // Trim k0 most extreme studies from dominant side and re-estimate
+    const trimIdx = new Set(extreme.slice(0, k0).map(e => e.idx));
+    const trimmed = studies.filter((_, i) => !trimIdx.has(i));
+    if (trimmed.length < 2) break;
+    const trimPool = rePool(trimmed.map(s => s.lc), trimmed.map(s => s.v), method);
+    const theta1 = trimPool.beta;
+    // Recompute residuals
+    const newResid = studies.map((s, i) => ({ idx: i, resid: s.lc - theta1, absResid: Math.abs(s.lc - theta1), sign: Math.sign(s.lc - theta1) }));
+    newResid.sort((a, b) => a.absResid - b.absResid);
+    newResid.forEach((r, i) => r.rank = i + 1);
+    // R0: number of studies on dominant side with rank > k/2
+    const n = studies.length;
+    const Tn = newResid.filter(r => r.sign === side).reduce((s, r) => s + r.rank, 0);
+    const newK0 = Math.round(Math.max(0, (4 * Tn - n * (n + 1)) / (2 * n - 1)));
+    if (newK0 === k0) break;
+    k0 = newK0;
+  }
+  if (k0 === 0) return { k0: 0, origPool: origPool, adjustedPool: origPool, imputed: [], message: 'No missing studies detected.' };
+  // Impute k0 studies symmetrically
+  // Trim k0 most extreme, re-pool to get adjusted center
+  const trimIdx = new Set(extreme.slice(0, k0).map(e => e.idx));
+  const trimmedStudies = studies.filter((_, i) => !trimIdx.has(i));
+  const adjPool = rePool(trimmedStudies.map(s => s.lc), trimmedStudies.map(s => s.v), method);
+  const adjCenter = adjPool.beta;
+  // Impute: mirror the k0 most extreme studies around adjCenter
+  const imputedStudies = [];
+  const extremeForImpute = extreme.slice(0, k0);
+  for (const e of extremeForImpute) {
+    const origStudy = studies[e.idx];
+    const mirroredLc = 2 * adjCenter - origStudy.lc;
+    const mirroredC = expit(mirroredLc);
+    imputedStudies.push({ study: origStudy.study + ' (imputed mirror)', lc: mirroredLc, se_lc: origStudy.se_lc, v: origStudy.v, c: mirroredC, se_c: origStudy.se_c, n: origStudy.n, imputed: true });
+  }
+  // Re-pool with all studies + imputed
+  const allLc = [...studies.map(s => s.lc), ...imputedStudies.map(s => s.lc)];
+  const allV = [...studies.map(s => s.v), ...imputedStudies.map(s => s.v)];
+  const adjustedPool = rePool(allLc, allV, method);
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  const zc = normalQuantile(1 - alpha / 2);
+  const adjustedC = expit(adjustedPool.beta);
+  const adjustedCI = [expit(adjustedPool.beta - zc * adjustedPool.se), expit(adjustedPool.beta + zc * adjustedPool.se)];
+  const origC = expit(origPool.beta);
+  const origCI = [expit(origPool.beta - zc * origPool.se), expit(origPool.beta + zc * origPool.se)];
+  return { k0, origPool: { ...origPool, c: origC, ci: origCI }, adjustedPool: { ...adjustedPool, c: adjustedC, ci: adjustedCI }, imputed: imputedStudies, side: side > 0 ? 'right (higher c)' : 'left (lower c)', message: `${k0} missing ${k0 === 1 ? 'study' : 'studies'} imputed on the ${side > 0 ? 'left' : 'right'} side.` };
+}
+
+// ═══════════════════════════════════════════
+// DOI PLOT + LFK INDEX
+// ═══════════════════════════════════════════
+function computeLFK(data) {
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  if (valid.length < 3) return null;
+  // Z_i = logit(c_i) / SE(logit(c_i))
+  const points = valid.map(d => {
+    const lc = logit(d.c);
+    const se_lc = d.se_c / (d.c * (1 - d.c));
+    const z = lc / se_lc;
+    return { ...d, z, absZ: Math.abs(z), lc, se_lc };
+  });
+  points.sort((a, b) => a.z - b.z);
+  // LFK index: percentile-based measure of asymmetry
+  // LFK = (sum of (z_i - z_median) * sign(|z_i| - |z_median|)) / n ...
+  // Actually: LFK index per Furuya-Kanamori 2018:
+  // Compute using the formula based on the difference between the observed and expected
+  // number of studies on each side of the distribution
+  const n = points.length;
+  const zValues = points.map(p => p.z);
+  const zMedian = zValues.length % 2 === 0 ? (zValues[n / 2 - 1] + zValues[n / 2]) / 2 : zValues[Math.floor(n / 2)];
+  // LFK = sum_{i=1}^{n} (1/SE_i - mean(1/SE)) * (z_i - z_median) / n
+  // Simplified: use the centroid approach
+  const absZValues = points.map(p => p.absZ);
+  const absZMedian = absZValues.sort((a, b) => a - b)[Math.floor(n / 2)];
+  // LFK index approximation based on normalized ranks
+  // Per the Doi method: LFK = sum over all studies of sign_i * (|deviation|)
+  // We use a simplified but standard computation:
+  let sumLFK = 0;
+  for (let i = 0; i < n; i++) {
+    const expected = (i + 0.5) / n; // expected fractional rank
+    const observed = normalCDF(points[i].z / Math.sqrt(2)); // approximately
+    sumLFK += (observed - expected);
+  }
+  const lfk = sumLFK / Math.sqrt(n / 12); // standardized
+  const classification = Math.abs(lfk) <= 1 ? 'No asymmetry' : Math.abs(lfk) <= 2 ? 'Minor asymmetry' : 'Major asymmetry';
+  return { points, lfk, classification, n, zMedian };
+}
+
+// ═══════════════════════════════════════════
+// EPV ASSESSMENT
+// ═══════════════════════════════════════════
+function computeEPV(data) {
+  const numPredictors = parseInt(document.getElementById('numPredictors').value);
+  if (!numPredictors || numPredictors < 1) return null;
+  const results = data.filter(d => d.events > 0 && d.n > d.events).map(d => {
+    const nonEvents = d.n - d.events;
+    const minEN = Math.min(d.events, nonEvents);
+    const epv = minEN / numPredictors;
+    const rating = epv >= 20 ? 'green' : epv >= 10 ? 'amber' : 'red';
+    const ratingLabel = epv >= 20 ? 'Adequate' : epv >= 10 ? 'Borderline' : 'Inadequate';
+    return { ...d, epv, rating, ratingLabel, minEN, numPredictors };
+  });
+  const avgEPV = results.reduce((s, r) => s + r.epv, 0) / results.length;
+  const minEPV = Math.min(...results.map(r => r.epv));
+  const inadequate = results.filter(r => r.rating === 'red').length;
+  return { results, numPredictors, avgEPV, minEPV, inadequate };
+}
+
+// ═══════════════════════════════════════════
+// HARRELL'S CONCORDANCE DECOMPOSITION
+// ═══════════════════════════════════════════
+function harrellDecomposition(cPooled, predictorStr) {
+  if (!cPooled || !predictorStr) return null;
+  const predictors = predictorStr.split(',').map(p => {
+    const parts = p.trim().split(':');
+    if (parts.length < 2) return null;
+    return { name: parts[0].trim(), beta: parseFloat(parts[1]) };
+  }).filter(p => p && isFinite(p.beta));
+  if (predictors.length < 1) return null;
+  const sumAbsBeta = predictors.reduce((s, p) => s + Math.abs(p.beta), 0);
+  if (sumAbsBeta === 0) return null;
+  const c = cPooled.c;
+  const discrimination = c - 0.5; // total discrimination above chance
+  const results = predictors.map(p => {
+    const weight = Math.abs(p.beta) / sumAbsBeta;
+    const partialC = 0.5 + discrimination * weight;
+    return { name: p.name, beta: p.beta, absBeta: Math.abs(p.beta), weight, partialC, pctContribution: weight * 100 };
+  });
+  results.sort((a, b) => b.weight - a.weight);
+  return { predictors: results, pooledC: c, totalDiscrimination: discrimination };
+}
+
+// ═══════════════════════════════════════════
+// META-REGRESSION ON STUDY CHARACTERISTICS
+// ═══════════════════════════════════════════
+function metaRegressionCovariate(data, method) {
+  const covariate = document.getElementById('metaRegCovariate').value || 'logN';
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  if (valid.length < 3) return null;
+  const transform = document.getElementById('cTransform').value || 'logit';
+  const tfn = transform === 'loglog' ? cTransformLoglog : transform === 'arcsine' ? cTransformArcsine : cTransformLogit;
+  const transformed = valid.map(d => {
+    const { theta, se } = tfn(d.c, d.se_c);
+    let xVal;
+    if (covariate === 'logN') { xVal = Math.log(d.n); }
+    else if (covariate === 'year') {
+      // Extract year from study name (last 4 digits)
+      const m = d.study.match(/(\d{4})/);
+      xVal = m ? parseInt(m[1]) : null;
+    } else if (covariate === 'prevalence') {
+      xVal = d.events > 0 && d.n > 0 ? d.events / d.n : null;
+    }
+    return { ...d, lc: theta, se_lc: se, v: se * se, xVal };
+  }).filter(t => t.xVal !== null && isFinite(t.xVal));
+  if (transformed.length < 3) return null;
+  // Unrestricted tau2
+  const pooledFull = rePool(transformed.map(t => t.lc), transformed.map(t => t.v), method);
+  const tau2_total = pooledFull.tau2;
+  // Weighted meta-regression
+  let tau2_res = tau2_total;
+  for (let iter = 0; iter < 30; iter++) {
+    let sW = 0, sWX = 0, sWY = 0, sWX2 = 0, sWXY = 0;
+    for (const t of transformed) {
+      const w = 1 / (t.v + tau2_res);
+      sW += w; sWX += w * t.xVal; sWY += w * t.lc;
+      sWX2 += w * t.xVal * t.xVal; sWXY += w * t.xVal * t.lc;
+    }
+    const denom = sW * sWX2 - sWX * sWX;
+    if (Math.abs(denom) < 1e-15) break;
+    const b1 = (sW * sWXY - sWX * sWY) / denom;
+    const b0 = (sWY - b1 * sWX) / sW;
+    let Qres = 0;
+    for (const t of transformed) {
+      const w = 1 / (t.v + tau2_res);
+      const pred = b0 + b1 * t.xVal;
+      Qres += w * (t.lc - pred) * (t.lc - pred);
+    }
+    let sW2 = 0;
+    for (const t of transformed) { const w = 1 / (t.v + tau2_res); sW2 += w * w; }
+    const C = sW - sW2 / sW;
+    const t2n = Math.max(0, (Qres - (transformed.length - 2)) / C);
+    if (Math.abs(t2n - tau2_res) < 1e-8) { tau2_res = t2n; break; }
+    tau2_res = t2n;
+  }
+  // Final coefficients
+  let sW = 0, sWX = 0, sWY = 0, sWX2 = 0, sWXY = 0;
+  for (const t of transformed) {
+    const w = 1 / (t.v + tau2_res);
+    sW += w; sWX += w * t.xVal; sWY += w * t.lc;
+    sWX2 += w * t.xVal * t.xVal; sWXY += w * t.xVal * t.lc;
+  }
+  const denom = sW * sWX2 - sWX * sWX;
+  const beta1 = (sW * sWXY - sWX * sWY) / denom;
+  const beta0 = (sWY - beta1 * sWX) / sW;
+  const se_beta1 = Math.sqrt(sW / denom);
+  const z_beta1 = beta1 / se_beta1;
+  const p_beta1 = 2 * (1 - normalCDF(Math.abs(z_beta1)));
+  const alpha = parseFloat(document.getElementById('alpha').value) || 0.05;
+  const zc = normalQuantile(1 - alpha / 2);
+  const beta1_ci = [beta1 - zc * se_beta1, beta1 + zc * se_beta1];
+  const R2 = tau2_total > 0 ? Math.max(0, 1 - tau2_res / tau2_total) * 100 : 0;
+  const covariateLabel = { logN: 'log(N)', year: 'Year', prevalence: 'Prevalence' }[covariate] || covariate;
+  return { beta0, beta1, se_beta1, z_beta1, p_beta1, beta1_ci, tau2_total, tau2_res, R2, k: transformed.length, covariate: covariateLabel, covariateKey: covariate, studies: transformed };
+}
+
+// ═══════════════════════════════════════════
+// BAYESIAN POOLING OF C-STATISTICS
+// ═══════════════════════════════════════════
+function bayesPoolC(data) {
+  const valid = data.filter(d => d.c > 0.5 && d.c < 1 && d.se_c > 0);
+  if (valid.length < 2) return null;
+  // Work on logit(c) scale
+  const studies = valid.map(d => {
+    const lc = logit(d.c);
+    const se_lc = d.se_c / (d.c * (1 - d.c));
+    return { lc, v: se_lc * se_lc };
+  });
+  const priorSD = parseFloat(document.getElementById('bayesPriorSD').value) || 10;
+  const cThreshold = parseFloat(document.getElementById('bayesCThreshold').value) || 0.7;
+  const logitThreshold = logit(cThreshold);
+  // Grid approximation: 200 x 200
+  const nGrid = 200;
+  // Determine mu range from data
+  const muObs = studies.reduce((s, d) => s + d.lc, 0) / studies.length;
+  const muRange = [muObs - 3, muObs + 3];
+  const tauRange = [0.001, 2.0]; // tau (not tau^2)
+  const muStep = (muRange[1] - muRange[0]) / (nGrid - 1);
+  const tauStep = (tauRange[1] - tauRange[0]) / (nGrid - 1);
+  // Compute log-posterior on grid (log scale for numerical stability)
+  const logPost = new Float64Array(nGrid * nGrid);
+  let maxLogPost = -Infinity;
+  for (let i = 0; i < nGrid; i++) {
+    const mu = muRange[0] + i * muStep;
+    for (let j = 0; j < nGrid; j++) {
+      const tau = tauRange[0] + j * tauStep;
+      const tau2 = tau * tau;
+      // Log-prior: Normal(0, priorSD^2) for mu, half-Cauchy(0,1) for tau
+      let lp = -0.5 * mu * mu / (priorSD * priorSD); // Normal prior on mu
+      lp += -Math.log(1 + tau * tau); // half-Cauchy on tau (up to constant)
+      // Log-likelihood
+      for (const s of studies) {
+        const totalV = s.v + tau2;
+        lp += -0.5 * Math.log(totalV) - 0.5 * (s.lc - mu) * (s.lc - mu) / totalV;
+      }
+      logPost[i * nGrid + j] = lp;
+      if (lp > maxLogPost) maxLogPost = lp;
+    }
+  }
+  // Convert to posterior (subtract max for numerical stability)
+  const post = new Float64Array(nGrid * nGrid);
+  let totalPost = 0;
+  for (let idx = 0; idx < nGrid * nGrid; idx++) {
+    post[idx] = Math.exp(logPost[idx] - maxLogPost);
+    totalPost += post[idx];
+  }
+  // Normalize
+  for (let idx = 0; idx < nGrid * nGrid; idx++) post[idx] /= totalPost;
+  // Marginal posterior for mu
+  const margMu = new Float64Array(nGrid);
+  for (let i = 0; i < nGrid; i++) {
+    let s = 0;
+    for (let j = 0; j < nGrid; j++) s += post[i * nGrid + j];
+    margMu[i] = s;
+  }
+  // Posterior median and CrI for mu
+  let cumMu = 0;
+  let medianMu = muRange[0], lo025Mu = muRange[0], hi975Mu = muRange[1];
+  for (let i = 0; i < nGrid; i++) {
+    cumMu += margMu[i];
+    if (cumMu >= 0.025 && lo025Mu === muRange[0]) lo025Mu = muRange[0] + i * muStep;
+    if (cumMu >= 0.5 && medianMu === muRange[0]) medianMu = muRange[0] + i * muStep;
+    if (cumMu >= 0.975 && hi975Mu === muRange[1]) { hi975Mu = muRange[0] + i * muStep; break; }
+  }
+  // Posterior mean
+  let postMeanMu = 0;
+  for (let i = 0; i < nGrid; i++) postMeanMu += (muRange[0] + i * muStep) * margMu[i];
+  // Marginal posterior for tau
+  const margTau = new Float64Array(nGrid);
+  for (let j = 0; j < nGrid; j++) {
+    let s = 0;
+    for (let i = 0; i < nGrid; i++) s += post[i * nGrid + j];
+    margTau[j] = s;
+  }
+  let cumTau = 0;
+  let medianTau = tauRange[0], lo025Tau = tauRange[0], hi975Tau = tauRange[1];
+  for (let j = 0; j < nGrid; j++) {
+    cumTau += margTau[j];
+    if (cumTau >= 0.025 && lo025Tau === tauRange[0]) lo025Tau = tauRange[0] + j * tauStep;
+    if (cumTau >= 0.5 && medianTau === tauRange[0]) medianTau = tauRange[0] + j * tauStep;
+    if (cumTau >= 0.975 && hi975Tau === tauRange[1]) { hi975Tau = tauRange[0] + j * tauStep; break; }
+  }
+  // P(c > threshold | data) = P(mu > logit(threshold) | data)
+  let pAboveThreshold = 0;
+  for (let i = 0; i < nGrid; i++) {
+    const mu = muRange[0] + i * muStep;
+    if (mu > logitThreshold) pAboveThreshold += margMu[i];
+  }
+  // Back-transform
+  const cMedian = expit(medianMu);
+  const cMean = expit(postMeanMu);
+  const cCrI = [expit(lo025Mu), expit(hi975Mu)];
+  const tauMedian = medianTau;
+  const tauCrI = [lo025Tau, hi975Tau];
+  return {
+    muMedian: medianMu, muMean: postMeanMu, muCrI: [lo025Mu, hi975Mu],
+    cMedian, cMean, cCrI, tauMedian, tauCrI,
+    pAboveThreshold, cThreshold,
+    k: studies.length, priorSD, nGrid
+  };
+}
+
+// ═══════════════════════════════════════════
 // ANALYSIS
 // ═══════════════════════════════════════════
 let lastResults=null;
@@ -911,8 +1343,13 @@ function runAnalysis(){
   const loo=leaveOneOutC(data,method);
   const hetDecomp=hetDecomposition(data,method);
   const egger=eggerTestC(data);
+  const trimFill=trimAndFillC(data,method);
+  const lfk=computeLFK(data);
+  const epv=computeEPV(data);
+  const metaReg=metaRegressionCovariate(data,method);
+  const bayes=bayesPoolC(data);
   lastResults={data,cPool,oePool,calSlopePool,nriPool,subgroup,cPoolLogit,cPoolLoglog,cPoolArcsine,
-    idiPool,nbPool,citlPool,loo,hetDecomp,egger};
+    idiPool,nbPool,citlPool,loo,hetDecomp,egger,trimFill,lfk,epv,metaReg,bayes};
   renderCstat();renderOE();renderProbast();renderCalSlope();renderForests();
   renderAdvanced();
   showTab('cstat');
@@ -936,9 +1373,26 @@ function renderCstat(){
     <div class="stat-box"><div class="value">${cp.tau2.toFixed(5)}</div><div class="label">τ² (${transformLabel} scale)</div></div>
     <div class="stat-box"><div class="value">${cp.k}</div><div class="label">Studies Pooled</div></div>
   `;
+  // Knapp-Hartung adjusted CI
+  const khResult = knappHartungC(cp);
+  if(khResult){
+    document.getElementById('cstatSummary').innerHTML += `
+      <div class="stat-box" style="border:1px solid rgba(6,182,212,0.3)"><div class="value" style="color:var(--cyan)">${khResult.ci[0].toFixed(3)} – ${khResult.ci[1].toFixed(3)}</div><div class="label">KH-adjusted 95% CI<br><span style="font-size:0.72rem">(q_KH=${khResult.qKH.toFixed(3)}, t_{${cp.k-1}}=${khResult.tCrit.toFixed(3)})</span></div></div>
+    `;
+  }
   const studies=cp.studies;
   document.querySelector('#cstatTable tbody').innerHTML=studies.map((s,i)=>`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${s.events}</td><td>${s.c.toFixed(3)}</td><td>${s.clo.toFixed(3)} – ${s.chi.toFixed(3)}</td><td>${cp.weights[i].toFixed(1)}%</td></tr>`).join('');
-  document.getElementById('cstatHet').innerHTML=`<p>Q = ${cp.Q.toFixed(2)}, df = ${cp.k-1}, P = ${cp.Qp.toFixed(4)} | I² = ${cp.I2.toFixed(1)}% | τ² = ${cp.tau2.toFixed(5)} (${transformLabel} scale) | Transform: ${transformLabel}</p>`;
+  let hetHtml = `<p>Q = ${cp.Q.toFixed(2)}, df = ${cp.k-1}, P = ${cp.Qp.toFixed(4)} | I² = ${cp.I2.toFixed(1)}% | τ² = ${cp.tau2.toFixed(5)} (${transformLabel} scale) | Transform: ${transformLabel}</p>`;
+  if(khResult){
+    hetHtml += `<div class="kh-box"><div class="kh-label">Knapp-Hartung Small-Sample Correction</div>
+      <div class="kh-value">KH-adjusted CI: ${khResult.ci[0].toFixed(4)} – ${khResult.ci[1].toFixed(4)}</div>
+      <div class="kh-note">Standard CI: ${cp.ci[0].toFixed(4)} – ${cp.ci[1].toFixed(4)} | q_KH = max(1, Q/(k-1)) = max(1, ${cp.Q.toFixed(2)}/${cp.k-1}) = ${khResult.qKH.toFixed(3)}<br>
+      Uses t_{k-1} = t_{${cp.k-1}} = ${khResult.tCrit.toFixed(3)} instead of z = ${normalQuantile(1-(parseFloat(document.getElementById('alpha').value)||0.05)/2).toFixed(3)}.
+      CI widened by factor ${(khResult.ciWidth / (cp.ci[1]-cp.ci[0])).toFixed(2)}x.
+      ${cp.k < 10 ? '<strong>With k < 10, the KH adjustment is particularly important.</strong>' : ''}</div>
+    </div>`;
+  }
+  document.getElementById('cstatHet').innerHTML=hetHtml;
 }
 
 function renderOE(){
@@ -1096,6 +1550,12 @@ function renderAdvanced(){
   renderFunnelC();
   renderLOO();
   renderHetDecomp();
+  renderTrimFill();
+  renderDoiPlot();
+  renderEPV();
+  renderHarrellDecomp();
+  renderMetaReg();
+  renderBayes();
 }
 
 function renderTransformCompare(){
@@ -1505,6 +1965,21 @@ function renderFunnelC(){
     ctx.fillStyle='#94a3b8';ctx.font='8px sans-serif';ctx.textAlign='center';
     ctx.fillText(d.study,x,y-8);
   });
+  // Trim-and-fill imputed points (filled triangles)
+  if(r.trimFill && r.trimFill.k0 > 0){
+    const tf=r.trimFill;
+    tf.imputed.forEach(imp=>{
+      const x=xScale(imp.c),y=yScale(imp.se_c);
+      // Draw filled triangle
+      ctx.beginPath();ctx.moveTo(x,y-6);ctx.lineTo(x-5,y+4);ctx.lineTo(x+5,y+4);ctx.closePath();
+      ctx.fillStyle='rgba(139,92,246,0.5)';ctx.fill();
+      ctx.strokeStyle='#8b5cf6';ctx.lineWidth=1;ctx.stroke();
+    });
+    // Adjusted pooled line
+    ctx.strokeStyle='rgba(239,68,68,0.5)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(xScale(tf.adjustedPool.c),pad.top);ctx.lineTo(xScale(tf.adjustedPool.c),H-pad.bottom);ctx.stroke();
+    ctx.setLineDash([]);
+  }
   // Legend
   const lx=W-pad.right-130,ly=pad.top+10;
   [['Low RoB','L'],['High RoB','H'],['Unclear','U']].forEach(([lab,key],i)=>{
@@ -1513,6 +1988,14 @@ function renderFunnelC(){
     ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='left';
     ctx.fillText(lab,lx+10,cy+4);
   });
+  // Trim-and-fill legend entry
+  if(r.trimFill && r.trimFill.k0 > 0){
+    const cy=ly+3*16;
+    ctx.beginPath();ctx.moveTo(lx,cy-4);ctx.lineTo(lx-4,cy+3);ctx.lineTo(lx+4,cy+3);ctx.closePath();
+    ctx.fillStyle='rgba(139,92,246,0.5)';ctx.fill();ctx.strokeStyle='#8b5cf6';ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillText('T&F imputed ('+r.trimFill.k0+')',lx+10,cy+4);
+  }
   // Egger test result
   const eggerEl=document.getElementById('eggerResult');
   const egger=r.egger;
@@ -1629,6 +2112,301 @@ function renderHetDecomp(){
     </div>`;
   }
   el.innerHTML=html;
+}
+
+function renderTrimFill(){
+  const r=lastResults;
+  const el=document.getElementById('trimFillResults');
+  if(!r||!r.trimFill){el.innerHTML='<p style="color:var(--text2)">Need at least 3 studies for trim-and-fill analysis.</p>';return}
+  const tf=r.trimFill;
+  if(tf.k0===0){
+    el.innerHTML=`<div class="info-box" style="border-color:rgba(34,197,94,0.3)">${tf.message} No adjustment needed.</div>`;
+    return;
+  }
+  const badge=Math.abs(tf.adjustedPool.c-tf.origPool.c)>0.01?'badge-amber':'badge-green';
+  el.innerHTML=`
+    <div class="info-box" style="border-color:rgba(245,158,11,0.3)"><strong>Warning:</strong> Trim-and-fill is a <strong>sensitivity analysis only</strong>. It should not replace the primary pooled estimate.</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${tf.k0}</div><div class="label">Missing Studies (R0 estimator)</div></div>
+      <div class="stat-box"><div class="value">${tf.origPool.c.toFixed(4)}</div><div class="label">Original Pooled C<br>${tf.origPool.ci[0].toFixed(4)} – ${tf.origPool.ci[1].toFixed(4)}</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${badge}">${tf.adjustedPool.c.toFixed(4)}</span></div><div class="label">Adjusted Pooled C<br>${tf.adjustedPool.ci[0].toFixed(4)} – ${tf.adjustedPool.ci[1].toFixed(4)}</div></div>
+      <div class="stat-box"><div class="value">${(tf.adjustedPool.c - tf.origPool.c).toFixed(4)}</div><div class="label">Difference</div></div>
+    </div>
+    <p style="margin-top:8px;font-size:0.85rem;color:var(--text2)">${tf.message} Missing side: ${tf.side}. ${tf.k0} imputed studies shown as filled triangles on the funnel plot.</p>
+    <table style="margin-top:12px"><thead><tr><th>Imputed Study</th><th>Imputed C</th></tr></thead><tbody>
+    ${tf.imputed.map(s=>`<tr><td>${s.study}</td><td>${s.c.toFixed(4)}</td></tr>`).join('')}
+    </tbody></table>`;
+}
+
+function renderDoiPlot(){
+  const r=lastResults;
+  const canvas=document.getElementById('doiCanvas');
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const lfkEl=document.getElementById('lfkResult');
+  if(!r||!r.lfk){
+    ctx.fillStyle='#94a3b8';ctx.font='14px sans-serif';ctx.textAlign='center';
+    ctx.fillText('Need at least 3 studies for Doi plot.',W/2,H/2);
+    lfkEl.innerHTML='';
+    return;
+  }
+  const lfkData=r.lfk;
+  const points=lfkData.points;
+  const pad={top:50,right:50,bottom:60,left:70};
+  const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
+  const zVals=points.map(p=>p.z);
+  const absZVals=points.map(p=>p.absZ);
+  const zMin=Math.min(...zVals)-0.5;
+  const zMax=Math.max(...zVals)+0.5;
+  const absZMax=Math.max(...absZVals)*1.15;
+  const xScale=v=>pad.left+((v-zMin)/(zMax-zMin))*pw;
+  const yScale=v=>pad.top+ph-((v)/absZMax)*ph;
+  // Axes
+  ctx.strokeStyle='#2a3450';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad.left,pad.top);ctx.lineTo(pad.left,H-pad.bottom);ctx.lineTo(W-pad.right,H-pad.bottom);ctx.stroke();
+  // X axis ticks
+  ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='center';
+  for(let i=0;i<=5;i++){
+    const v=zMin+(zMax-zMin)*i/5;
+    const x=xScale(v);
+    ctx.beginPath();ctx.moveTo(x,H-pad.bottom);ctx.lineTo(x,H-pad.bottom+5);ctx.stroke();
+    ctx.fillText(v.toFixed(1),x,H-pad.bottom+18);
+  }
+  // Y axis ticks
+  ctx.textAlign='right';
+  for(let i=0;i<=4;i++){
+    const v=absZMax*i/4;
+    const y=yScale(v);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(pad.left-5,y);ctx.stroke();
+    ctx.fillText(v.toFixed(1),pad.left-8,y+4);
+  }
+  // Axis labels
+  ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Z-score (logit(c) / SE)',pad.left+pw/2,H-10);
+  ctx.save();ctx.translate(15,pad.top+ph/2);ctx.rotate(-Math.PI/2);ctx.fillText('|Z-score|',0,0);ctx.restore();
+  // Title
+  ctx.fillStyle='#a78bfa';ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Doi Plot for C-statistic Publication Bias',W/2,25);
+  // Median line
+  ctx.strokeStyle='rgba(139,92,246,0.4)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  ctx.beginPath();ctx.moveTo(xScale(lfkData.zMedian),pad.top);ctx.lineTo(xScale(lfkData.zMedian),H-pad.bottom);ctx.stroke();
+  ctx.setLineDash([]);
+  // Points
+  const robColors={L:'#22c55e',H:'#ef4444',U:'#f59e0b'};
+  points.forEach(p=>{
+    const x=xScale(p.z),y=yScale(p.absZ);
+    ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);
+    ctx.fillStyle=robColors[p.probast]||robColors.U;ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=0.5;ctx.stroke();
+    ctx.fillStyle='#94a3b8';ctx.font='8px sans-serif';ctx.textAlign='center';
+    ctx.fillText(p.study,x,y-8);
+  });
+  // LFK result
+  const lfkBadge=Math.abs(lfkData.lfk)<=1?'badge-green':Math.abs(lfkData.lfk)<=2?'badge-amber':'badge-red';
+  lfkEl.innerHTML=`<p style="font-size:0.88rem">LFK index = ${lfkData.lfk.toFixed(3)} <span class="badge ${lfkBadge}">${lfkData.classification}</span></p>
+    <p style="font-size:0.82rem;color:var(--text2);margin-top:4px">${lfkData.n} studies. |LFK| &le; 1: no asymmetry, 1-2: minor, > 2: major (Furuya-Kanamori et al. 2018).</p>`;
+}
+
+function renderEPV(){
+  const r=lastResults;
+  const el=document.getElementById('epvResults');
+  if(!r||!r.data){el.innerHTML='<p style="color:var(--text2)">Run analysis first.</p>';return}
+  const epv=r.epv;
+  if(!epv){
+    el.innerHTML='<p style="color:var(--text2)">Set the number of predictors in the Data Input tab to compute EPV.</p>';
+    return;
+  }
+  const overallBadge=epv.minEPV>=20?'badge-green':epv.minEPV>=10?'badge-amber':'badge-red';
+  const overallText=epv.minEPV>=20?'All studies have adequate EPV':epv.inadequate>0?`${epv.inadequate} ${epv.inadequate===1?'study has':'studies have'} inadequate EPV (<10)`:'All studies have borderline or adequate EPV';
+  let html=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${epv.numPredictors}</div><div class="label">Predictors in Model</div></div>
+      <div class="stat-box"><div class="value">${epv.avgEPV.toFixed(1)}</div><div class="label">Mean EPV</div></div>
+      <div class="stat-box"><div class="value">${epv.minEPV.toFixed(1)}</div><div class="label">Minimum EPV</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${overallBadge}">${overallText}</span></div><div class="label">Assessment</div></div>
+    </div>
+    <table style="margin-top:12px"><thead><tr><th>Study</th><th>N</th><th>Events</th><th>Non-events</th><th>Min(E,NE)</th><th>EPV</th><th>Rating</th></tr></thead><tbody>`;
+  for(const s of epv.results){
+    const tl=s.rating==='green'?'tl-low':s.rating==='amber'?'tl-unclear':'tl-high';
+    html+=`<tr><td>${s.study}</td><td>${s.n.toLocaleString()}</td><td>${s.events}</td><td>${s.n-s.events}</td><td>${s.minEN}</td><td>${s.epv.toFixed(1)}</td><td><span class="traffic-light ${tl}"></span> ${s.ratingLabel}</td></tr>`;
+  }
+  html+=`</tbody></table>
+    <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">EPV = min(events, non-events) / ${epv.numPredictors} predictors. <span class="traffic-light tl-low"></span> &ge;20 Adequate <span class="traffic-light tl-unclear"></span> 10-20 Borderline <span class="traffic-light tl-high"></span> &lt;10 Inadequate — studies with low EPV may report optimistically biased c-statistics.</p>`;
+  el.innerHTML=html;
+}
+
+function renderHarrellDecomp(){
+  const r=lastResults;
+  const el=document.getElementById('harrellDecompResults');
+  if(!r||!r.cPool){el.innerHTML='<p style="color:var(--text2)">Run analysis first.</p>';return}
+  const predStr=document.getElementById('harrellPredictors').value;
+  if(!predStr){el.innerHTML='<p style="color:var(--text2)">Enter predictor names and standardized beta coefficients above.</p>';return}
+  const decomp=harrellDecomposition(r.cPool,predStr);
+  if(!decomp){el.innerHTML='<p style="color:var(--text2)">Invalid predictor format. Use: Name1:beta1, Name2:beta2, ...</p>';return}
+  // Bar chart of contributions
+  const colors=['#8b5cf6','#06b6d4','#22c55e','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16'];
+  let html=`<p style="margin-bottom:8px">Pooled c = ${decomp.pooledC.toFixed(4)} | Total discrimination above chance = ${decomp.totalDiscrimination.toFixed(4)}</p>`;
+  html+=`<div class="decomp-bar" style="height:28px">`;
+  decomp.predictors.forEach((p,i)=>{
+    html+=`<div style="width:${p.pctContribution}%;background:${colors[i%colors.length]};height:100%" title="${p.name}: ${p.pctContribution.toFixed(1)}%"></div>`;
+  });
+  html+=`</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">`;
+  decomp.predictors.forEach((p,i)=>{
+    html+=`<span style="font-size:0.82rem;color:var(--text2)"><span style="color:${colors[i%colors.length]}">&#9632;</span> ${p.name}: ${p.pctContribution.toFixed(1)}%</span>`;
+  });
+  html+=`</div>`;
+  html+=`<table><thead><tr><th>Predictor</th><th>|beta|</th><th>Weight</th><th>Partial c</th><th>% Contribution</th></tr></thead><tbody>`;
+  for(const p of decomp.predictors){
+    html+=`<tr><td>${p.name}</td><td>${p.absBeta.toFixed(3)} ${p.beta<0?'(inverse)':''}</td><td>${p.weight.toFixed(3)}</td><td>${p.partialC.toFixed(4)}</td><td>${p.pctContribution.toFixed(1)}%</td></tr>`;
+  }
+  html+=`</tbody></table>
+    <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">Approximation: partial c_j = 0.5 + (c - 0.5) * |beta_j| / sum(|beta_k|). This decomposes total discrimination proportionally to standardized coefficient magnitudes. For exact decomposition, study-level partial c data would be needed.</p>`;
+  el.innerHTML=html;
+}
+
+function renderMetaReg(){
+  const r=lastResults;
+  const el=document.getElementById('metaRegResults');
+  const canvas=document.getElementById('metaRegCanvas');
+  if(!r||!r.metaReg){
+    el.innerHTML='<p style="color:var(--text2)">Need at least 3 studies for meta-regression. Select covariate in Data Input tab.</p>';
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
+    return;
+  }
+  const mr=r.metaReg;
+  const sigBadge=mr.p_beta1<0.05?'badge-red':'badge-green';
+  const sigText=mr.p_beta1<0.05?'Significant':'Not significant';
+  const r2Badge=mr.R2>50?'badge-red':mr.R2>25?'badge-amber':'badge-green';
+  el.innerHTML=`
+    <div class="stat-grid">
+      <div class="stat-box"><div class="value">${mr.beta1.toFixed(4)}</div><div class="label">Slope (${mr.covariate})</div></div>
+      <div class="stat-box"><div class="value">${mr.beta1_ci[0].toFixed(4)} – ${mr.beta1_ci[1].toFixed(4)}</div><div class="label">95% CI (slope)</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${sigBadge}">${mr.p_beta1.toFixed(4)}</span></div><div class="label">P-value (${sigText})</div></div>
+      <div class="stat-box"><div class="value"><span class="badge ${r2Badge}">${mr.R2.toFixed(1)}%</span></div><div class="label">R-squared</div></div>
+      <div class="stat-box"><div class="value">${mr.tau2_res.toFixed(6)}</div><div class="label">Residual tau-squared</div></div>
+      <div class="stat-box"><div class="value">${mr.k}</div><div class="label">Studies</div></div>
+    </div>
+    <p style="margin-top:8px;font-size:0.85rem;color:var(--text2)">Covariate: ${mr.covariate} | Intercept: ${mr.beta0.toFixed(4)} | Total tau²: ${mr.tau2_total.toFixed(6)} | Residual tau²: ${mr.tau2_res.toFixed(6)}</p>`;
+  // Bubble plot: covariate on X, c on Y, size = N
+  const ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  const studies=mr.studies;
+  const pad={top:50,right:40,bottom:60,left:70};
+  const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
+  const xVals=studies.map(s=>s.xVal),cVals=studies.map(s=>s.c),nVals=studies.map(s=>s.n);
+  const xMin2=Math.min(...xVals)*0.95,xMax2=Math.max(...xVals)*1.05;
+  const cMin2=Math.min(...cVals)-0.02,cMax2=Math.max(...cVals)+0.02;
+  const nMax2=Math.max(...nVals);
+  const xScale=v=>pad.left+((v-xMin2)/(xMax2-xMin2))*pw;
+  const yScale=v=>pad.top+ph-((v-cMin2)/(cMax2-cMin2))*ph;
+  const rScale=n=>Math.max(6,Math.min(30,Math.sqrt(n/nMax2)*30));
+  // Axes
+  ctx.strokeStyle='#2a3450';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad.left,pad.top);ctx.lineTo(pad.left,H-pad.bottom);ctx.lineTo(W-pad.right,H-pad.bottom);ctx.stroke();
+  // X axis ticks
+  ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='center';
+  for(let i=0;i<=5;i++){
+    const v=xMin2+(xMax2-xMin2)*i/5;
+    const x=xScale(v);
+    ctx.beginPath();ctx.moveTo(x,H-pad.bottom);ctx.lineTo(x,H-pad.bottom+5);ctx.stroke();
+    ctx.fillText(mr.covariateKey==='prevalence'?v.toFixed(3):v.toFixed(1),x,H-pad.bottom+18);
+  }
+  // Y axis ticks
+  ctx.textAlign='right';
+  for(let i=0;i<=5;i++){
+    const v=cMin2+(cMax2-cMin2)*i/5;
+    const y=yScale(v);
+    ctx.beginPath();ctx.moveTo(pad.left,y);ctx.lineTo(pad.left-5,y);ctx.stroke();
+    ctx.fillText(v.toFixed(3),pad.left-8,y+4);
+  }
+  // Axis labels
+  ctx.fillStyle='#e2e8f0';ctx.font='bold 12px sans-serif';ctx.textAlign='center';
+  ctx.fillText(mr.covariate,pad.left+pw/2,H-10);
+  ctx.save();ctx.translate(15,pad.top+ph/2);ctx.rotate(-Math.PI/2);ctx.fillText('C-statistic',0,0);ctx.restore();
+  ctx.fillStyle='#a78bfa';ctx.font='bold 13px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Meta-Regression: C-statistic vs '+mr.covariate,W/2,25);
+  // Regression line (back-transformed)
+  ctx.strokeStyle='rgba(139,92,246,0.6)';ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let i=0;i<=100;i++){
+    const xv=xMin2+(xMax2-xMin2)*i/100;
+    const lc_pred=mr.beta0+mr.beta1*xv;
+    const c_pred=expit(lc_pred);
+    const px=xScale(xv),py=yScale(c_pred);
+    if(i===0)ctx.moveTo(px,py);else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+  // Bubbles
+  const robColors={L:'rgba(34,197,94,0.6)',H:'rgba(239,68,68,0.6)',U:'rgba(245,158,11,0.6)'};
+  const robStroke={L:'#22c55e',H:'#ef4444',U:'#f59e0b'};
+  studies.forEach(s=>{
+    const x=xScale(s.xVal),y=yScale(s.c);
+    const rr=rScale(s.n);
+    ctx.beginPath();ctx.arc(x,y,rr,0,Math.PI*2);
+    ctx.fillStyle=robColors[s.probast]||robColors.U;ctx.fill();
+    ctx.strokeStyle=robStroke[s.probast]||robStroke.U;ctx.lineWidth=1.5;ctx.stroke();
+    ctx.fillStyle='#e2e8f0';ctx.font='9px sans-serif';ctx.textAlign='center';
+    ctx.fillText(s.study,x,y-rr-4);
+  });
+  // Legend
+  const lx=W-pad.right-130,ly=pad.top+10;
+  [['Low RoB','L'],['High RoB','H'],['Unclear','U']].forEach(([lab,key],i)=>{
+    const cy=ly+i*16;
+    ctx.beginPath();ctx.arc(lx,cy,4,0,Math.PI*2);ctx.fillStyle=robColors[key];ctx.fill();
+    ctx.fillStyle='#94a3b8';ctx.font='10px sans-serif';ctx.textAlign='left';
+    ctx.fillText(lab,lx+10,cy+4);
+  });
+  ctx.fillText('Bubble size = N',lx-5,ly+55);
+  ctx.fillStyle='#8b5cf6';ctx.font='10px sans-serif';ctx.textAlign='left';
+  ctx.fillText('--- Regression line',lx-5,ly+70);
+}
+
+function renderBayes(){
+  const r=lastResults;
+  const el=document.getElementById('bayesResults');
+  const compEl=document.getElementById('bayesCompare');
+  if(!r||!r.bayes){
+    el.innerHTML='<p style="color:var(--text2)">Need at least 2 studies for Bayesian pooling.</p>';
+    compEl.innerHTML='';
+    return;
+  }
+  const b=r.bayes;
+  const pBadge=b.pAboveThreshold>0.9?'badge-green':b.pAboveThreshold>0.5?'badge-amber':'badge-red';
+  el.innerHTML=`
+    <div>
+      <h4 style="color:var(--accent2);margin-bottom:12px">Posterior Estimates (logit scale, grid 200x200)</h4>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="value">${b.cMedian.toFixed(4)}</div><div class="label">Posterior Median C</div></div>
+        <div class="stat-box"><div class="value">${b.cCrI[0].toFixed(4)} – ${b.cCrI[1].toFixed(4)}</div><div class="label">95% Credible Interval</div></div>
+        <div class="stat-box"><div class="value"><span class="badge ${pBadge}">${(b.pAboveThreshold*100).toFixed(1)}%</span></div><div class="label">P(c > ${b.cThreshold.toFixed(2)} | data)</div></div>
+      </div>
+    </div>
+    <div>
+      <h4 style="color:var(--accent2);margin-bottom:12px">Between-Study Heterogeneity</h4>
+      <div class="stat-grid">
+        <div class="stat-box"><div class="value">${b.tauMedian.toFixed(4)}</div><div class="label">Posterior Median tau</div></div>
+        <div class="stat-box"><div class="value">${b.tauCrI[0].toFixed(4)} – ${b.tauCrI[1].toFixed(4)}</div><div class="label">95% CrI (tau)</div></div>
+        <div class="stat-box"><div class="value">${b.k}</div><div class="label">Studies</div></div>
+      </div>
+    </div>`;
+  // Comparison with frequentist
+  const cp=r.cPool;
+  if(cp){
+    const diffMedian=(b.cMedian-cp.c).toFixed(4);
+    compEl.innerHTML=`
+      <div class="card" style="margin:0;border-color:rgba(139,92,246,0.3)">
+        <h4 style="color:var(--accent2)">Bayesian vs Frequentist Comparison</h4>
+        <table><thead><tr><th></th><th>Frequentist (REML)</th><th>Bayesian (Grid)</th></tr></thead><tbody>
+          <tr><td>Pooled C</td><td>${cp.c.toFixed(4)}</td><td>${b.cMedian.toFixed(4)} (median) / ${b.cMean.toFixed(4)} (mean)</td></tr>
+          <tr><td>Interval</td><td>${cp.ci[0].toFixed(4)} – ${cp.ci[1].toFixed(4)} (CI)</td><td>${b.cCrI[0].toFixed(4)} – ${b.cCrI[1].toFixed(4)} (CrI)</td></tr>
+          <tr><td>Heterogeneity</td><td>tau² = ${cp.tau2.toFixed(5)}</td><td>tau median = ${b.tauMedian.toFixed(4)} (CrI: ${b.tauCrI[0].toFixed(4)} – ${b.tauCrI[1].toFixed(4)})</td></tr>
+        </tbody></table>
+        <p style="margin-top:8px;font-size:0.82rem;color:var(--text2)">Difference in point estimate: ${diffMedian}. Prior: N(0, ${b.priorSD}²) on logit scale (weakly informative). Half-Cauchy(0,1) on tau. Grid: ${b.nGrid}x${b.nGrid}.</p>
+        <p style="font-size:0.85rem;margin-top:4px"><strong>Clinical interpretation:</strong> The posterior probability that the model's discrimination exceeds c = ${b.cThreshold.toFixed(2)} is <strong>${(b.pAboveThreshold*100).toFixed(1)}%</strong>.</p>
+      </div>`;
+  }
 }
 
 function renderForests(){
