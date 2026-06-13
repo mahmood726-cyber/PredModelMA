@@ -1110,6 +1110,7 @@ function computeEPV(data) {
     const ratingLabel = epv >= 20 ? 'Adequate' : epv >= 10 ? 'Borderline' : 'Inadequate';
     return { ...d, epv, rating, ratingLabel, minEN, numPredictors };
   });
+  if (results.length < 1) return null;
   const avgEPV = results.reduce((s, r) => s + r.epv, 0) / results.length;
   const minEPV = Math.min(...results.map(r => r.epv));
   const inadequate = results.filter(r => r.rating === 'red').length;
